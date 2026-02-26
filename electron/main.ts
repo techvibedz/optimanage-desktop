@@ -158,6 +158,7 @@ ipcMain.handle('print:slip', async () => {
       printBackground: true,
       pageSize: { width: 148000, height: 210000 }, // A5 in microns
       margins: { marginType: 'none' },
+      dpi: { horizontal: 300, vertical: 300 },
     }, (success, failureReason) => {
       if (success) resolve({ success: true })
       else resolve({ error: failureReason || 'Print cancelled' })
