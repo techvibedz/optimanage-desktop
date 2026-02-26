@@ -347,6 +347,9 @@ export const translations: Record<Language, Translations> = {
     'orders.distanceVisionVL': 'Distance Vision (VL)',
     'orders.nearVisionVP': 'Near Vision (VP)',
     'orders.paymentStatus': 'Payment',
+    'orders.contactLenses': 'Contact Lenses',
+    'orders.selectContactLens': 'Select a contact lens...',
+    'orders.noContactLenses': 'No contact lenses available. Add them in inventory.',
 
     // Common extras
     'common.method': 'Method',
@@ -783,6 +786,9 @@ export const translations: Record<Language, Translations> = {
     'orders.distanceVisionVL': 'Vision de Loin (VL)',
     'orders.nearVisionVP': 'Vision de Pr\u00e8s (VP)',
     'orders.paymentStatus': 'Paiement',
+    'orders.contactLenses': 'Lentilles de contact',
+    'orders.selectContactLens': 'S\u00e9lectionner une lentille...',
+    'orders.noContactLenses': 'Aucune lentille disponible. Ajoutez-les dans l\u0027inventaire.',
 
     // Common extras
     'common.method': 'M\u00e9thode',

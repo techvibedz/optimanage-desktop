@@ -486,6 +486,36 @@ function registerIpcHandlers() {
     catch (err: any) { return { error: err.message } }
   })
 
+  // ── Contact Lenses ──────────────────────────────────────────────────────
+  ipcMain.handle('contactLenses:list', async (_e, params: { userId: string; search?: string }) => {
+    try {
+      const where: any = { userId: params.userId }
+      if (params.search) {
+        where.OR = [
+          { brand: { contains: params.search, mode: 'insensitive' } },
+          { model: { contains: params.search, mode: 'insensitive' } },
+        ]
+      }
+      const data = await prisma.contactLens.findMany({ where, orderBy: { brand: 'asc' } })
+      return { data }
+    } catch (err: any) { return { error: err.message } }
+  })
+
+  ipcMain.handle('contactLenses:create', async (_e, contactLens: any) => {
+    try { return { data: await prisma.contactLens.create({ data: contactLens }) } }
+    catch (err: any) { return { error: err.message } }
+  })
+
+  ipcMain.handle('contactLenses:update', async (_e, id: string, updates: any) => {
+    try { return { data: await prisma.contactLens.update({ where: { id }, data: updates }) } }
+    catch (err: any) { return { error: err.message } }
+  })
+
+  ipcMain.handle('contactLenses:delete', async (_e, id: string) => {
+    try { await prisma.contactLens.delete({ where: { id } }); return { success: true } }
+    catch (err: any) { return { error: err.message } }
+  })
+
   // ── Payments ──────────────────────────────────────────────────────────────
   ipcMain.handle('payments:list', async (_e, params: any) => {
     try {

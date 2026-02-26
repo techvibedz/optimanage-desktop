@@ -334,6 +334,15 @@ export default function OrderDetailsPage() {
 
   return (
     <>
+      <style>{`
+        @media print {
+          body * { visibility: hidden !important; }
+          .print-slip-content, .print-slip-content * { visibility: visible !important; }
+          .print-slip-content { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; }
+          .no-print { display: none !important; }
+          @page { size: A5 portrait; margin: 0; }
+        }
+      `}</style>
       {/* Print overlay */}
       {showPrintSlip && (
         <div className="fixed inset-0 z-[9999] bg-white print:bg-white">
@@ -344,7 +353,7 @@ export default function OrderDetailsPage() {
               <button onClick={() => setShowPrintSlip(false)} className="px-4 py-2 border border-border rounded-lg text-sm">Close</button>
             </div>
           </div>
-          <div className="p-4">
+          <div className="print-slip-content p-4 print:p-0">
             <OrderSlip order={order} />
           </div>
         </div>

@@ -24,6 +24,7 @@ type Prescription = {
 }
 type SelectedFrame = { id: string; price: number; brand?: string; model?: string }
 type AdditionalService = { name: string; price: number }
+type ContactLens = { id: string; brand: string; model?: string; price: number }
 
 // ─── Utility: format prescription value ──────────────────────────────────────
 const fmtVal = (v: number | null | undefined, isAxis = false): string => {
@@ -389,6 +390,7 @@ export default function CreateOrderPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [frames, setFrames] = useState<Frame[]>([])
   const [lensTypes, setLensTypes] = useState<LensType[]>([])
+  const [contactLenses, setContactLenses] = useState<ContactLens[]>([])
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([])
 
   // Form state
@@ -411,6 +413,9 @@ export default function CreateOrderPage() {
   const [vpLeftLensId, setVpLeftLensId] = useState('')
   const [vpLeftLensPrice, setVpLeftLensPrice] = useState(0)
   const [vpLeftQty, setVpLeftQty] = useState(1)
+
+  // Contact lenses
+  const [selectedContactLenses, setSelectedContactLenses] = useState<{ id: string; brand: string; model?: string; price: number; qty: number }[]>([])
 
   // Additional services
   const [services, setServices] = useState<AdditionalService[]>([])
@@ -496,10 +501,12 @@ export default function CreateOrderPage() {
       window.electronAPI.getCustomers({ userId: user.id, limit: 500 }),
       window.electronAPI.getFrames({ userId: user.id }),
       window.electronAPI.getLensTypes({ userId: user.id }),
-    ]).then(([custRes, frameRes, lensRes]) => {
+      window.electronAPI.getContactLenses({ userId: user.id }),
+    ]).then(([custRes, frameRes, lensRes, clRes]) => {
       if (custRes.data) setCustomers(custRes.data)
       if (frameRes.data) setFrames(frameRes.data)
       if (lensRes.data) setLensTypes(lensRes.data)
+      if (clRes.data) setContactLenses(clRes.data)
     })
 
     // Fetch latest order number and compute next sequential one
@@ -542,8 +549,9 @@ export default function CreateOrderPage() {
     [vlRightLensPrice, vlRightQty, vlLeftLensPrice, vlLeftQty, vpRightLensPrice, vpRightQty, vpLeftLensPrice, vpLeftQty]
   )
 
+  const contactLensTotal = useMemo(() => selectedContactLenses.reduce((s, cl) => s + cl.price * cl.qty, 0), [selectedContactLenses])
   const servicesTotal = useMemo(() => services.reduce((s, svc) => s + svc.price, 0), [services])
-  const totalPrice = framesTotal + lensTotal + servicesTotal
+  const totalPrice = framesTotal + lensTotal + contactLensTotal + servicesTotal
   const balanceDue = Math.max(0, totalPrice - depositAmount)
 
   // ─── Handlers ───────────────────────────────────────────────────────────
@@ -663,7 +671,7 @@ export default function CreateOrderPage() {
         vpRightEyeLensPrice: vpRightLensPrice * vpRightQty,
         vpLeftEyeLensPrice: vpLeftLensPrice * vpLeftQty,
         basePrice: framesTotal + lensTotal,
-        addonsPrice: servicesTotal,
+        addonsPrice: servicesTotal + contactLensTotal,
         totalPrice,
         depositAmount,
         balanceDue,
@@ -671,9 +679,10 @@ export default function CreateOrderPage() {
         expectedCompletionDate: readyDate ? new Date(readyDate).toISOString() : new Date().toISOString(),
         createdAt: orderDate ? new Date(orderDate).toISOString() : new Date().toISOString(),
         customerNotes: notes,
-        technicalNotes: services.length > 0
-          ? `Additional Services: ${services.map(s => `${s.name}: ${s.price} DA`).join(', ')}`
-          : '',
+        technicalNotes: [
+          ...(selectedContactLenses.length > 0 ? [`Contact Lenses: ${selectedContactLenses.map(cl => `${cl.brand}${cl.model ? ' ' + cl.model : ''} x${cl.qty}: ${cl.price * cl.qty} DA`).join(', ')}`] : []),
+          ...(services.length > 0 ? [`Additional Services: ${services.map(s => `${s.name}: ${s.price} DA`).join(', ')}`] : []),
+        ].join(' | '),
       }
 
       const result = await window.electronAPI.createOrder(orderData)
@@ -730,9 +739,10 @@ export default function CreateOrderPage() {
     <>
     <style>{`
       @media print {
-        body * { visibility: hidden; }
-        .print-slip-content, .print-slip-content * { visibility: visible; }
-        .print-slip-content { position: absolute; left: 0; top: 0; width: 100%; }
+        body * { visibility: hidden !important; }
+        .print-slip-content, .print-slip-content * { visibility: visible !important; }
+        .print-slip-content { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; }
+        .no-print { display: none !important; }
         @page { size: A5 portrait; margin: 0; }
       }
     `}</style>
@@ -1180,10 +1190,59 @@ export default function CreateOrderPage() {
             </div>
           )}
 
-          {/* 5. Frames — AFTER lenses */}
+          {/* 5. Contact Lenses */}
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-border p-5">
             <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-xs flex items-center justify-center font-bold">5</span>
+              <span className="w-6 h-6 rounded-full bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300 text-xs flex items-center justify-center font-bold">5</span>
+              {t('orders.contactLenses')}
+            </h3>
+            {selectedContactLenses.length > 0 && (
+              <div className="space-y-2 mb-3">
+                {selectedContactLenses.map((cl, i) => (
+                  <div key={i} className="flex items-center justify-between p-3 border rounded-lg bg-muted/30">
+                    <div>
+                      <div className="font-medium text-sm">{cl.brand}{cl.model ? ` ${cl.model}` : ''}</div>
+                      <div className="text-xs text-muted-foreground">{cl.price.toLocaleString()} {t('orders.currency')} × {cl.qty} = {(cl.price * cl.qty).toLocaleString()} {t('orders.currency')}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input type="number" min={1} value={cl.qty}
+                        onChange={e => {
+                          const qty = Math.max(1, parseInt(e.target.value) || 1)
+                          setSelectedContactLenses(prev => prev.map((c, j) => j === i ? { ...c, qty } : c))
+                        }}
+                        className="w-16 px-2 py-1 border border-border rounded text-sm bg-background" />
+                      <button type="button" onClick={() => setSelectedContactLenses(prev => prev.filter((_, j) => j !== i))} className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded">
+                        <X className="h-4 w-4 text-red-500" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {contactLenses.length > 0 ? (
+              <select
+                value=""
+                onChange={e => {
+                  const cl = contactLenses.find(c => c.id === e.target.value)
+                  if (cl && !selectedContactLenses.find(s => s.id === cl.id)) {
+                    setSelectedContactLenses(prev => [...prev, { id: cl.id, brand: cl.brand, model: cl.model, price: cl.price, qty: 1 }])
+                  }
+                }}
+                className="w-full px-3 py-2.5 border border-border rounded-lg text-sm bg-background">
+                <option value="">{t('orders.selectContactLens')}</option>
+                {contactLenses.filter(cl => !selectedContactLenses.find(s => s.id === cl.id)).map(cl => (
+                  <option key={cl.id} value={cl.id}>{cl.brand}{cl.model ? ` ${cl.model}` : ''} — {cl.price.toLocaleString()} {t('orders.currency')}</option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-sm text-muted-foreground">{t('orders.noContactLenses')}</p>
+            )}
+          </div>
+
+          {/* 6. Frames — AFTER lenses */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-border p-5">
+            <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
+              <span className="w-6 h-6 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-xs flex items-center justify-center font-bold">6</span>
               {t('orders.frames')}
             </h3>
             {selectedFrames.length > 0 && (
@@ -1204,10 +1263,10 @@ export default function CreateOrderPage() {
             <FrameSelectDropdown frames={frames} onSelect={addFrame} exclude={selectedFrames.map(f => f.id)} t={t} />
           </div>
 
-          {/* 6. Additional Services */}
+          {/* 7. Additional Services */}
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-border p-5">
             <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-xs flex items-center justify-center font-bold">6</span>
+              <span className="w-6 h-6 rounded-full bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-xs flex items-center justify-center font-bold">7</span>
               {t('orders.additionalServices')}
             </h3>
             {services.length > 0 && (
@@ -1237,10 +1296,10 @@ export default function CreateOrderPage() {
             </div>
           </div>
 
-          {/* 7. Notes & Dates */}
+          {/* 8. Notes & Dates */}
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-border p-5">
             <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs flex items-center justify-center font-bold">7</span>
+              <span className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs flex items-center justify-center font-bold">8</span>
               {t('orders.notesAndDates')}
             </h3>
             <div className="space-y-4">

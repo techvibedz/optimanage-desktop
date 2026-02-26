@@ -37,6 +37,12 @@ export interface ElectronAPI {
   updateLensType: (id: string, updates: any) => Promise<{ data?: any; error?: string }>
   deleteLensType: (id: string) => Promise<{ success?: boolean; error?: string }>
 
+  // Contact Lenses
+  getContactLenses: (params: { userId: string; search?: string }) => Promise<{ data?: any[]; error?: string }>
+  createContactLens: (contactLens: any) => Promise<{ data?: any; error?: string }>
+  updateContactLens: (id: string, updates: any) => Promise<{ data?: any; error?: string }>
+  deleteContactLens: (id: string) => Promise<{ success?: boolean; error?: string }>
+
   // Payments
   getPayments: (params: any) => Promise<{ data?: any; error?: string }>
   createPayment: (payment: any) => Promise<{ data?: any; error?: string }>

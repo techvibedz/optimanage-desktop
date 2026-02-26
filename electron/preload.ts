@@ -41,6 +41,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateLensType: (id: string, updates: any) => ipcRenderer.invoke('lensTypes:update', id, updates),
   deleteLensType: (id: string) => ipcRenderer.invoke('lensTypes:delete', id),
 
+  // Contact Lenses
+  getContactLenses: (params: any) => ipcRenderer.invoke('contactLenses:list', params),
+  createContactLens: (contactLens: any) => ipcRenderer.invoke('contactLenses:create', contactLens),
+  updateContactLens: (id: string, updates: any) => ipcRenderer.invoke('contactLenses:update', id, updates),
+  deleteContactLens: (id: string) => ipcRenderer.invoke('contactLenses:delete', id),
+
   // Payments
   getPayments: (params: any) => ipcRenderer.invoke('payments:list', params),
   createPayment: (payment: any) => ipcRenderer.invoke('payments:create', payment),
