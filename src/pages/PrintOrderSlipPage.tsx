@@ -49,7 +49,7 @@ export default function PrintOrderSlipPage() {
   }
 
   return (
-    <div className="-m-6">
+    <div>
       <style>{`
         @media print {
           body * { visibility: hidden; }

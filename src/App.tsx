@@ -82,10 +82,11 @@ function AppRoutes() {
           <Route path="/expenses" element={<ExpensesPage />} />
           <Route path="/quick-sale" element={<QuickSalePage />} />
           <Route path="/lens-summary" element={<LensSummaryPage />} />
-          <Route path="/orders/:id/facture" element={<PrintFacturePage />} />
-          <Route path="/orders/:id/print" element={<PrintOrderSlipPage />} />
-          <Route path="/orders/:id/receipt" element={<PrintReceiptPage />} />
         </Route>
+        {/* Print pages outside AppLayout — no navbar/sidebar */}
+        <Route path="/orders/:id/facture" element={<ProtectedRoute><PrintFacturePage /></ProtectedRoute>} />
+        <Route path="/orders/:id/print" element={<ProtectedRoute><PrintOrderSlipPage /></ProtectedRoute>} />
+        <Route path="/orders/:id/receipt" element={<ProtectedRoute><PrintReceiptPage /></ProtectedRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Suspense>

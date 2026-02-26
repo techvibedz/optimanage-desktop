@@ -52,7 +52,8 @@ export default function PrintFacturePage() {
   const printStyles = `
     @media print {
       @page { size: A5 portrait; margin: 2mm 3mm 2mm 3mm; }
-      .price-input, input[type="text"], input[type="number"], textarea, select, button, .add-frame-btn, .remove-frame-btn, .add-contact-lens-btn, .remove-contact-lens-btn, .remove-lens-btn, [placeholder], [title*="Supprimer"], [title*="Ajouter"], [class*="btn"] { display: none !important; }
+      .print-controls, .print\\:hidden, button { display: none !important; }
+      .price-input, input[type="text"], input[type="number"], textarea, select, .add-frame-btn, .remove-frame-btn, .add-contact-lens-btn, .remove-contact-lens-btn, .remove-lens-btn, [placeholder], [title*="Supprimer"], [title*="Ajouter"] { display: none !important; }
       .price-input + span.final-value { display: inline !important; color: #000 !important; font-weight: 600 !important; }
       .frame-description, .contact-lens-description { display: block !important; color: #64748b !important; font-size: 8pt !important; }
       div[style*="display: flex"][style*="flexDirection: column"] > input, div[style*="display: flex"][style*="flexDirection: column"] > select { display: none !important; }

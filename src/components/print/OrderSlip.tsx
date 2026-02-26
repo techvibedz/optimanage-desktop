@@ -58,14 +58,17 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
   // Count prescription rows for height calculation
   const rxRows = (hasVL ? 2 : 0) + (hasVP ? 2 : 0) + (order.prescription?.pupillaryDistance ? 1 : 0)
-  // Atelier gets what it needs, client gets the rest. Total = 210mm, cut = 2mm
-  const atelierH = rxRows >= 5 ? '120mm' : rxRows >= 3 ? '112mm' : order.prescription ? '105mm' : '95mm'
-  const clientH = rxRows >= 5 ? '88mm' : rxRows >= 3 ? '96mm' : order.prescription ? '103mm' : '113mm'
+  const hasLensRows = (order.vlRightEyeLensType || order.vlLeftEyeLensType ? 1 : 0) + (order.vpRightEyeLensType || order.vpLeftEyeLensType ? 1 : 0) + (!order.vlRightEyeLensType && !order.vlLeftEyeLensType && !order.vpRightEyeLensType && !order.vpLeftEyeLensType && order.lensType ? 1 : 0)
+  // Total A5 = 210mm exactly. Cut line = 2mm. Atelier + Client = 208mm.
+  const atelierMm = rxRows >= 5 ? 115 : rxRows >= 3 ? 108 : order.prescription ? 100 : 90
+  const clientMm = 208 - atelierMm
+  const atelierH = `${atelierMm}mm`
+  const clientH = `${clientMm}mm`
 
   // ── Shared styles ──
   const F: React.CSSProperties = { fontFamily: "'Segoe UI', Arial, sans-serif", color: '#000', boxSizing: 'border-box' }
-  const cell: React.CSSProperties = { border: '1px solid #000', padding: '1mm 1.5mm', textAlign: 'center', fontSize: '8pt', lineHeight: '1.2' }
-  const hCell: React.CSSProperties = { ...cell, fontWeight: 700, fontSize: '7.5pt', borderBottom: '2px solid #000' }
+  const cell: React.CSSProperties = { border: '1px solid #000', padding: '1mm 1.5mm', textAlign: 'center', fontSize: '9pt', fontWeight: 700, lineHeight: '1.2' }
+  const hCell: React.CSSProperties = { ...cell, fontWeight: 800, fontSize: '8pt', borderBottom: '2px solid #000' }
 
   // ── Header ──
   const Header = ({ label }: { label: string }) => (
@@ -132,15 +135,15 @@ export default function OrderSlip({ order }: OrderSlipProps) {
           {(order.vlRightEyeLensType || order.vlLeftEyeLensType) && (
             <tr>
               <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>VL</td>
-              <td style={{ ...cell, fontSize: '7.5pt', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vlRightEyeLensType?.name || '-'}</td>
-              <td style={{ ...cell, fontSize: '7.5pt', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vlLeftEyeLensType?.name || '-'}</td>
+              <td style={{ ...cell, fontSize: '8.5pt', fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vlRightEyeLensType?.name || '-'}</td>
+              <td style={{ ...cell, fontSize: '8.5pt', fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vlLeftEyeLensType?.name || '-'}</td>
             </tr>
           )}
           {(order.vpRightEyeLensType || order.vpLeftEyeLensType) && (
             <tr>
-              <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>VP</td>
-              <td style={{ ...cell, fontSize: '7.5pt', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vpRightEyeLensType?.name || '-'}</td>
-              <td style={{ ...cell, fontSize: '7.5pt', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vpLeftEyeLensType?.name || '-'}</td>
+              <td style={{ ...cell, textAlign: 'left', fontWeight: 800 }}>VP</td>
+              <td style={{ ...cell, fontSize: '8.5pt', fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vpRightEyeLensType?.name || '-'}</td>
+              <td style={{ ...cell, fontSize: '8.5pt', fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vpLeftEyeLensType?.name || '-'}</td>
             </tr>
           )}
           {!order.vlRightEyeLensType && !order.vlLeftEyeLensType && !order.vpRightEyeLensType && !order.vpLeftEyeLensType && order.lensType && (
