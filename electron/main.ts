@@ -28,7 +28,9 @@ if (app.isPackaged) {
 }
 
 // ─── Env Config ───────────────────────────────────────────────────────────────
-const envPath = path.join(app.getAppPath(), '.env')
+const envPath = app.isPackaged
+  ? path.join(process.resourcesPath, '.env')
+  : path.join(app.getAppPath(), '.env')
 if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, 'utf-8')
   envContent.split('\n').forEach(line => {
