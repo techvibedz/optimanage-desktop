@@ -21,6 +21,23 @@
       "dist/**/*",
       "dist-electron/**/*"
     ],
+    "extraResources": [
+      {
+        "from": "node_modules/.prisma",
+        "to": ".prisma",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "node_modules/@prisma",
+        "to": "@prisma",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "prisma",
+        "to": "prisma",
+        "filter": ["**/*"]
+      }
+    ],
     "win": {
       "target": "nsis",
       "icon": "public/icon.ico"

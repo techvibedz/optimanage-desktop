@@ -1,9 +1,31 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
-import { PrismaClient } from '@prisma/client'
 import { autoUpdater } from 'electron-updater'
 import bcrypt from 'bcryptjs'
 import path from 'node:path'
 import fs from 'node:fs'
+import Module from 'node:module'
+
+// ─── Prisma: redirect requires to extraResources in production ───────────────
+if (app.isPackaged) {
+  const resPath = process.resourcesPath
+  // Set native query engine path
+  process.env.PRISMA_QUERY_ENGINE_LIBRARY = path.join(resPath, '.prisma', 'client', 'query_engine-windows.dll.node')
+
+  // Monkey-patch Module._resolveFilename so require('@prisma/client') and
+  // require('.prisma/client/default') find the copies in extraResources
+  const origResolve = (Module as any)._resolveFilename
+  ;(Module as any)._resolveFilename = function (request: string, ...args: any[]) {
+    if (request === '@prisma/client' || request.startsWith('@prisma/client/')) {
+      const target = path.join(resPath, request)
+      return origResolve.call(this, target, ...args)
+    }
+    if (request === '.prisma/client/default' || request === '.prisma/client' || request.startsWith('.prisma/')) {
+      const target = path.join(resPath, request)
+      return origResolve.call(this, target, ...args)
+    }
+    return origResolve.call(this, request, ...args)
+  }
+}
 
 // ─── Env Config ───────────────────────────────────────────────────────────────
 const envPath = path.join(app.getAppPath(), '.env')
@@ -18,6 +40,7 @@ if (fs.existsSync(envPath)) {
 }
 
 // ─── Prisma Client ───────────────────────────────────────────────────────────
+const { PrismaClient } = require('@prisma/client')
 const prisma = new PrismaClient()
 
 // ─── Window ───────────────────────────────────────────────────────────────────
@@ -62,33 +85,41 @@ app.whenReady().then(() => {
   registerIpcHandlers()
   createWindow()
 
-  // ── Auto Update ──────────────────────────────────────────────────────────
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
+  // ── Auto Update (only in production) ─────────────────────────────────────
+  if (app.isPackaged) {
+    autoUpdater.autoDownload = true
+    autoUpdater.autoInstallOnAppQuit = true
 
-  autoUpdater.on('update-available', (info: any) => {
-    mainWindow?.webContents.send('update-status', { status: 'downloading', version: info.version })
-  })
+    // For private repos, set the GitHub token
+    const ghToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
+    if (ghToken) {
+      autoUpdater.requestHeaders = { Authorization: `token ${ghToken}` }
+    }
 
-  autoUpdater.on('update-downloaded', (info: any) => {
-    dialog.showMessageBox(mainWindow!, {
-      type: 'info',
-      title: 'Update Ready',
-      message: `Version ${info.version} has been downloaded. Restart to apply the update.`,
-      buttons: ['Restart Now', 'Later'],
-    }).then(({ response }) => {
-      if (response === 0) autoUpdater.quitAndInstall()
+    autoUpdater.on('update-available', (info: any) => {
+      mainWindow?.webContents.send('update-status', { status: 'downloading', version: info.version })
     })
-  })
 
-  autoUpdater.on('error', (err: any) => {
-    console.error('Auto-update error:', err.message)
-  })
+    autoUpdater.on('update-downloaded', (info: any) => {
+      dialog.showMessageBox(mainWindow!, {
+        type: 'info',
+        title: 'Update Ready',
+        message: `Version ${info.version} has been downloaded. Restart to apply the update.`,
+        buttons: ['Restart Now', 'Later'],
+      }).then(({ response }) => {
+        if (response === 0) autoUpdater.quitAndInstall()
+      })
+    })
 
-  // Check for updates after 3 seconds (avoid blocking startup)
-  setTimeout(() => {
-    autoUpdater.checkForUpdatesAndNotify().catch(() => {})
-  }, 3000)
+    autoUpdater.on('error', (err: any) => {
+      console.error('Auto-update error:', err.message)
+    })
+
+    // Check for updates after 3 seconds (avoid blocking startup)
+    setTimeout(() => {
+      autoUpdater.checkForUpdatesAndNotify().catch(() => {})
+    }, 3000)
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
