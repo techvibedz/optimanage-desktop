@@ -109,6 +109,10 @@ export const translations: Record<Language, Translations> = {
     // Dashboard
     'dashboard.title': 'Dashboard',
     'dashboard.subtitle': 'Overview of your optical shop performance',
+    'dashboard.goodMorning': 'Good morning',
+    'dashboard.goodAfternoon': 'Good afternoon',
+    'dashboard.goodEvening': 'Good evening',
+    'dashboard.revenueBreakdown': 'Revenue Breakdown',
     'dashboard.totalCustomers': 'Total Customers',
     'dashboard.registeredCustomers': 'Registered customers',
     'dashboard.ordersToday': 'Orders Today',
@@ -541,6 +545,10 @@ export const translations: Record<Language, Translations> = {
     // Dashboard
     'dashboard.title': 'Tableau de bord',
     'dashboard.subtitle': 'Aper\u00e7u des performances de votre magasin',
+    'dashboard.goodMorning': 'Bonjour',
+    'dashboard.goodAfternoon': 'Bon apr\u00e8s-midi',
+    'dashboard.goodEvening': 'Bonsoir',
+    'dashboard.revenueBreakdown': 'D\u00e9tail des revenus',
     'dashboard.totalCustomers': 'Total Clients',
     'dashboard.registeredCustomers': 'Clients enregistr\u00e9s',
     'dashboard.ordersToday': "Commandes aujourd'hui",

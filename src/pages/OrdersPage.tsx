@@ -15,7 +15,7 @@ export default function OrdersPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
-  const [statusFilter, setStatusFilter] = useState('')
+  const [paymentFilter, setPaymentFilter] = useState('')
   const fetchIdRef = useRef(0)
 
   // Debounce search input
@@ -27,14 +27,14 @@ export default function OrdersPage() {
     return () => clearTimeout(timer)
   }, [search])
 
-  useEffect(() => { fetchOrders() }, [page, debouncedSearch, statusFilter])
+  useEffect(() => { fetchOrders() }, [page, debouncedSearch, paymentFilter])
 
   const fetchOrders = async () => {
     if (!user?.id) return
     const fetchId = ++fetchIdRef.current
     setLoading(true)
     const result = await window.electronAPI.getOrders({
-      userId: user.id, page, limit: 10, search: debouncedSearch, status: statusFilter,
+      userId: user.id, page, limit: 10, search: debouncedSearch, paymentStatus: paymentFilter,
     })
     if (fetchId !== fetchIdRef.current) return
     if (result.data) {
@@ -108,15 +108,12 @@ export default function OrdersPage() {
             className="flex-1 px-3 py-2 bg-white dark:bg-gray-800 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
         </div>
         <div className="toolbar-actions">
-          <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
+          <select value={paymentFilter} onChange={e => { setPaymentFilter(e.target.value); setPage(1) }}
             className="px-3 py-2 bg-white dark:bg-gray-800 border border-border rounded-lg text-sm focus:outline-none">
             <option value="">{t('common.all')}</option>
-            <option value="pending">{t('orders.pending')}</option>
-            <option value="in_progress">{t('orders.in_progress')}</option>
-            <option value="ready">{t('orders.ready')}</option>
-            <option value="completed">{t('orders.completed')}</option>
-            <option value="delivered">{t('orders.delivered')}</option>
-            <option value="cancelled">{t('orders.cancelled')}</option>
+            <option value="paid">{t('orders.paid')}</option>
+            <option value="partial">{t('orders.partial')}</option>
+            <option value="unpaid">{t('orders.unpaid')}</option>
           </select>
         </div>
       </div>

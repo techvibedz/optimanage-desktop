@@ -745,6 +745,8 @@ export default function CreateOrderPage() {
               {orderNumber && (
                 <span className="text-base font-medium px-3 py-1 bg-primary/10 text-primary rounded-lg">{orderNumber}</span>
               )}
+              <input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)}
+                className="text-base font-medium px-3 py-1 border border-border rounded-lg bg-background" />
             </h1>
             <p className="text-muted-foreground text-sm">{t('orders.fillOrderDetails')}</p>
           </div>
@@ -1242,11 +1244,6 @@ export default function CreateOrderPage() {
               {t('orders.notesAndDates')}
             </h3>
             <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-muted-foreground mb-1 block">{t('orders.orderDate')}</label>
-                <input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background" />
-              </div>
               <div>
                 <label className="text-sm font-medium text-muted-foreground mb-1 block">{t('orders.readyDate')}</label>
                 <input type="date" value={readyDate} onChange={e => setReadyDate(e.target.value)}

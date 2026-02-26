@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   DollarSign, ShoppingCart, Users, RefreshCw, Package, Zap, Eye, EyeOff,
-  TrendingUp, TrendingDown, Minus, ArrowRight, FileText, CreditCard, BarChart3
+  TrendingUp, TrendingDown, Minus, ArrowRight, FileText, CreditCard, BarChart3, CalendarDays
 } from 'lucide-react'
 import { useTranslation } from '@/lib/use-translation'
 import { useAuth } from '@/lib/auth-context'
@@ -35,7 +35,10 @@ export default function DashboardPage() {
   const { user } = useAuth()
   const [stats, setStats] = useState<DashboardStats>(defaultStats)
   const [loading, setLoading] = useState(true)
-  const [activeFilter, setActiveFilter] = useState<'all' | 'today' | 'week' | 'month'>('today')
+  const [activeFilter, setActiveFilter] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('today')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
+  const [showDatePicker, setShowDatePicker] = useState(false)
   const [showPriceStats, setShowPriceStats] = useState(() => {
     const saved = localStorage.getItem('dashboard_show_prices')
     return saved !== null ? saved === 'true' : true
@@ -43,11 +46,11 @@ export default function DashboardPage() {
 
   useEffect(() => { fetchStats(activeFilter) }, [])
 
-  const fetchStats = async (filter: string) => {
+  const fetchStats = async (filter: string, startDate?: string, endDate?: string) => {
     if (!user?.id) return
     setLoading(true)
     try {
-      const result = await window.electronAPI.getDashboardStats({ userId: user.id, filter })
+      const result = await window.electronAPI.getDashboardStats({ userId: user.id, filter, startDate, endDate })
       if (result.data) {
         setStats({ ...defaultStats, ...result.data })
       }
@@ -58,9 +61,21 @@ export default function DashboardPage() {
     }
   }
 
-  const handleFilterChange = (filter: 'all' | 'today' | 'week' | 'month') => {
+  const handleFilterChange = (filter: 'all' | 'today' | 'week' | 'month' | 'custom') => {
     setActiveFilter(filter)
-    fetchStats(filter)
+    if (filter === 'custom') {
+      setShowDatePicker(true)
+      if (customStart && customEnd) fetchStats('custom', customStart, customEnd)
+    } else {
+      setShowDatePicker(false)
+      fetchStats(filter)
+    }
+  }
+
+  const handleCustomDateApply = () => {
+    if (customStart && customEnd) {
+      fetchStats('custom', customStart, customEnd)
+    }
   }
 
   const handlePriceToggle = () => {
@@ -108,15 +123,33 @@ export default function DashboardPage() {
       </div>
 
       {/* Filter Tabs */}
-      <div className="inline-flex gap-1 bg-white/60 dark:bg-gray-800/60 rounded-xl p-1 border border-border/50">
-        {(['today', 'week', 'month', 'all'] as const).map(f => (
-          <button key={f}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeFilter === f
-              ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-white dark:hover:bg-gray-700'}`}
-            onClick={() => handleFilterChange(f)}>
-            {t(`dashboard.${f === 'week' ? 'thisWeek' : f === 'month' ? 'thisMonth' : f === 'all' ? 'allTime' : 'today'}`)}
-          </button>
-        ))}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="inline-flex gap-1 bg-white/60 dark:bg-gray-800/60 rounded-xl p-1 border border-border/50">
+          {(['today', 'week', 'month', 'all', 'custom'] as const).map(f => (
+            <button key={f}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeFilter === f
+                ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-white dark:hover:bg-gray-700'}`}
+              onClick={() => handleFilterChange(f)}>
+              {f === 'custom' ? (
+                <span className="flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" />{t('dashboard.custom')}</span>
+              ) : t(`dashboard.${f === 'week' ? 'thisWeek' : f === 'month' ? 'thisMonth' : f === 'all' ? 'allTime' : 'today'}`)}
+            </button>
+          ))}
+        </div>
+        {showDatePicker && (
+          <div className="flex items-center gap-2">
+            <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)}
+              className="px-3 py-2 rounded-lg border border-border bg-white dark:bg-gray-800 text-sm" />
+            <span className="text-muted-foreground text-sm">→</span>
+            <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)}
+              className="px-3 py-2 rounded-lg border border-border bg-white dark:bg-gray-800 text-sm" />
+            <button onClick={handleCustomDateApply}
+              disabled={!customStart || !customEnd}
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none">
+              {t('common.confirm')}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Stats Grid — 4 columns */}
@@ -171,55 +204,6 @@ export default function DashboardPage() {
           </div>
           <p className="text-2xl font-bold">{loading ? '—' : `${stats.revenueAnalytics.collectionRate}%`}</p>
           <p className="text-xs text-muted-foreground mt-1">{t('dashboard.collectionRate') || 'Collection Rate'}</p>
-        </div>
-      </div>
-
-      {/* Revenue Analytics + Payment Methods */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Revenue Breakdown */}
-        <div className="bg-white dark:bg-gray-800/50 rounded-2xl border border-border/50 p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-4">{t('dashboard.revenueBreakdown') || 'Revenue Breakdown'}</h3>
-          <div className="space-y-3">
-            <div className="flex items-center justify-between py-2 border-b border-border/30">
-              <span className="text-sm text-muted-foreground">{t('dashboard.payments') || 'Payments'}</span>
-              <span className="text-sm font-semibold text-green-600">{loading ? '—' : fmtAmount(stats.revenueAnalytics.payments)}</span>
-            </div>
-            <div className="flex items-center justify-between py-2 border-b border-border/30">
-              <span className="text-sm text-muted-foreground">{t('dashboard.deposits') || 'Deposits'}</span>
-              <span className="text-sm font-semibold">{loading ? '—' : fmtAmount(stats.revenueAnalytics.deposits)}</span>
-            </div>
-            <div className="flex items-center justify-between py-2 border-b border-border/30">
-              <span className="text-sm text-muted-foreground">{t('dashboard.outstanding') || 'Outstanding'}</span>
-              <span className="text-sm font-semibold text-orange-600">{loading ? '—' : fmtAmount(stats.revenueAnalytics.outstanding)}</span>
-            </div>
-            <div className="flex items-center justify-between py-2">
-              <span className="text-sm font-medium">{t('dashboard.totalRevenue') || 'Net Revenue'}</span>
-              <span className="text-sm font-bold text-primary">{loading ? '—' : fmtAmount(stats.totalRevenue)}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Payment Methods */}
-        <div className="bg-white dark:bg-gray-800/50 rounded-2xl border border-border/50 p-5">
-          <h3 className="text-sm font-semibold text-foreground mb-4">{t('dashboard.paymentMethods') || 'Payment Methods'}</h3>
-          {stats.paymentMethodBreakdown.length === 0 && !loading ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">{t('common.noData') || 'No data yet'}</p>
-          ) : (
-            <div className="space-y-3">
-              {stats.paymentMethodBreakdown.map((m, i) => (
-                <div key={i}>
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm capitalize">{m.method}</span>
-                    <span className="text-sm font-semibold">{fmtAmount(m.amount)}</span>
-                  </div>
-                  <div className="w-full h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${m.percentage}%` }} />
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{m.percentage}%</p>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
