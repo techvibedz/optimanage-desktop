@@ -52,52 +52,72 @@ export default function OrderSlip({ order }: OrderSlipProps) {
   const totalPaid = order.depositAmount || 0
   const balanceDue = Math.max(0, order.totalPrice - totalPaid)
   const paymentStatusText = balanceDue <= 0 ? 'PAYÉ' : totalPaid > 0 ? 'PARTIEL' : 'IMPAYÉ'
-  const statusColor = balanceDue <= 0 ? '#16a34a' : totalPaid > 0 ? '#d97706' : '#dc2626'
+  const statusColor = balanceDue <= 0 ? '#000' : totalPaid > 0 ? '#000' : '#000'
 
   const hasAnyLensType = order.vlRightEyeLensType || order.vlLeftEyeLensType || order.vpRightEyeLensType || order.vpLeftEyeLensType || order.lensType
 
-  const thStyle = (extra?: React.CSSProperties): React.CSSProperties => ({ padding: '1.2mm 2mm', textAlign: 'center', fontWeight: 700, borderBottom: '1.5px solid #cbd5e1', fontSize: '8pt', ...extra })
-  const tdStyle = (extra?: React.CSSProperties): React.CSSProperties => ({ padding: '1mm 2mm', textAlign: 'center', fontSize: '8.5pt', borderBottom: '0.5px solid #e2e8f0', ...extra })
+  // Bold black borders for all table cells
+  const thStyle = (extra?: React.CSSProperties): React.CSSProperties => ({
+    padding: '1.5mm 2.5mm', textAlign: 'center', fontWeight: 800, fontSize: '8.5pt', color: '#000',
+    border: '1.5px solid #000', ...extra
+  })
+  const tdStyle = (extra?: React.CSSProperties): React.CSSProperties => ({
+    padding: '1.2mm 2.5mm', textAlign: 'center', fontSize: '9pt', fontWeight: 500, color: '#000',
+    border: '1px solid #000', ...extra
+  })
 
   // ─── Shared header ─────────────────────────────────────────────
   const renderHeader = (title: string) => (
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '2.5mm', paddingBottom: '2mm', borderBottom: '2.5px solid #1e3a5f' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '2.5mm' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '3mm', paddingBottom: '2mm', borderBottom: '3px solid #000' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '3mm' }}>
         {settings.logoUrl && (
-          <img src={settings.logoUrl} alt="Logo" style={{ width: '12mm', height: '12mm', objectFit: 'contain', borderRadius: '1mm' }} />
+          <img src={settings.logoUrl} alt="Logo" style={{ width: '13mm', height: '13mm', objectFit: 'contain', borderRadius: '1mm' }} />
         )}
         <div>
-          <div style={{ fontSize: '12pt', fontWeight: 800, color: '#1e3a5f' }}>{settings.opticianName || 'OptiManage'}</div>
-          {settings.opticianAddress && <div style={{ fontSize: '7pt', color: '#475569', maxWidth: '55mm' }}>{settings.opticianAddress}</div>}
-          {settings.opticianPhone && <div style={{ fontSize: '7.5pt', color: '#475569' }}>{settings.opticianPhone}</div>}
+          <div style={{ fontSize: '13pt', fontWeight: 900, color: '#000', letterSpacing: '0.3px' }}>{settings.opticianName || 'OptiManage'}</div>
+          {settings.opticianAddress && <div style={{ fontSize: '7.5pt', color: '#000', maxWidth: '55mm', fontWeight: 500 }}>{settings.opticianAddress}</div>}
+          {settings.opticianPhone && <div style={{ fontSize: '8pt', color: '#000', fontWeight: 600 }}>{settings.opticianPhone}</div>}
         </div>
       </div>
       <div style={{ textAlign: 'right' }}>
-        <div style={{ fontSize: '8pt', fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{title}</div>
-        <div style={{ fontSize: '15pt', fontWeight: 900, color: '#1e3a5f', lineHeight: '1.1' }}>{order.orderNumber}</div>
-        <div style={{ fontSize: '7.5pt', color: '#64748b' }}>{formatDate(order.createdAt)}</div>
+        <div style={{ fontSize: '9pt', fontWeight: 800, color: '#000', textTransform: 'uppercase', letterSpacing: '1px', borderBottom: '2px solid #000', paddingBottom: '1mm', marginBottom: '1mm' }}>{title}</div>
+        <div style={{ fontSize: '16pt', fontWeight: 900, color: '#000', lineHeight: '1.1' }}>{order.orderNumber}</div>
+        <div style={{ fontSize: '8pt', color: '#000', fontWeight: 500 }}>{formatDate(order.createdAt)}</div>
       </div>
     </div>
   )
 
-  // ─── Payment footer (print-safe: borders instead of bg colors) ─
+  // ─── Payment footer ─────────────────────────────────────────────
   const renderPayment = (big: boolean) => {
-    const sz = big ? '9pt' : '8.5pt'
-    const szSm = big ? '8.5pt' : '8pt'
+    const sz = big ? '9.5pt' : '9pt'
+    const szSm = big ? '9pt' : '8.5pt'
     return (
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderTop: '2px solid #000', paddingTop: '2mm' }}>
         <div>
           {order.expectedCompletionDate && (
-            <div style={{ fontSize: big ? '9pt' : '8.5pt', fontWeight: 700, color: '#1e3a5f', padding: '1.2mm 3mm', border: '1.5px solid #1e3a5f' }}>
+            <div style={{ fontSize: big ? '9.5pt' : '9pt', fontWeight: 800, color: '#000', padding: '1.5mm 4mm', border: '2px solid #000' }}>
               Prête: {formatReadyDate(order.expectedCompletionDate)}
             </div>
           )}
         </div>
-        <div style={{ textAlign: 'right', minWidth: '38%' }}>
-          <div style={{ fontSize: szSm }}>Total: <strong>{formatCurrency(order.totalPrice)}</strong></div>
-          <div style={{ fontSize: szSm }}>Versé: <strong>{formatCurrency(totalPaid)}</strong></div>
-          <div style={{ fontSize: sz, fontWeight: 800, color: statusColor }}>Reste: {formatCurrency(balanceDue)}</div>
-          <div style={{ display: 'inline-block', marginTop: '1mm', padding: '0.8mm 3mm', border: `2px solid ${statusColor}`, fontSize: big ? '8pt' : '7pt', fontWeight: 800, color: statusColor }}>{paymentStatusText}</div>
+        <div style={{ textAlign: 'right', minWidth: '40%' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
+            <tbody>
+              <tr>
+                <td style={{ padding: '1mm 3mm', fontSize: szSm, fontWeight: 700, textAlign: 'left', border: '1px solid #000' }}>Total</td>
+                <td style={{ padding: '1mm 3mm', fontSize: szSm, fontWeight: 800, textAlign: 'right', border: '1px solid #000' }}>{formatCurrency(order.totalPrice)}</td>
+              </tr>
+              <tr>
+                <td style={{ padding: '1mm 3mm', fontSize: szSm, fontWeight: 700, textAlign: 'left', border: '1px solid #000' }}>Versé</td>
+                <td style={{ padding: '1mm 3mm', fontSize: szSm, fontWeight: 800, textAlign: 'right', border: '1px solid #000' }}>{formatCurrency(totalPaid)}</td>
+              </tr>
+              <tr>
+                <td style={{ padding: '1.2mm 3mm', fontSize: sz, fontWeight: 900, textAlign: 'left', border: '1.5px solid #000' }}>Reste</td>
+                <td style={{ padding: '1.2mm 3mm', fontSize: sz, fontWeight: 900, textAlign: 'right', border: '1.5px solid #000' }}>{formatCurrency(balanceDue)}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div style={{ display: 'inline-block', marginTop: '1.5mm', padding: '1mm 5mm', border: '2.5px solid #000', fontSize: big ? '8.5pt' : '8pt', fontWeight: 900, color: '#000', letterSpacing: '0.5px' }}>{paymentStatusText}</div>
         </div>
       </div>
     )
@@ -105,21 +125,21 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
   // ─── BON ATELIER ───────────────────────────────────────────────
   const renderAtelier = () => (
-    <div style={{ fontFamily: "'Inter', 'Segoe UI', sans-serif", fontSize: '9pt', color: '#1a1a1a', padding: '3mm 4mm', height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ fontFamily: "'Inter', 'Segoe UI', sans-serif", fontSize: '9pt', color: '#000', padding: '3mm 4mm', height: '100%', display: 'flex', flexDirection: 'column' }}>
       {renderHeader('BON ATELIER')}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2mm' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2.5mm', padding: '1.5mm 3mm', border: '1.5px solid #000' }}>
         <div>
-          <div style={{ fontSize: '7pt', fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>Client</div>
-          <div style={{ fontWeight: 700, fontSize: '10pt' }}>{customerName}</div>
-          {order.customer?.phone && <div style={{ fontSize: '8pt', color: '#475569' }}>{order.customer.phone}</div>}
+          <div style={{ fontSize: '7pt', fontWeight: 800, color: '#000', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Client</div>
+          <div style={{ fontWeight: 800, fontSize: '10.5pt' }}>{customerName}</div>
+          {order.customer?.phone && <div style={{ fontSize: '8.5pt', color: '#000', fontWeight: 600 }}>{order.customer.phone}</div>}
         </div>
         <div style={{ textAlign: 'right' }}>
           {order.frame && (
             <div>
-              <div style={{ fontSize: '7pt', fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>Monture</div>
-              <div style={{ fontSize: '9pt', fontWeight: 600 }}>{order.frame.brand} {order.frame.model}</div>
-              <div style={{ fontSize: '8pt', color: '#475569' }}>{order.frame.color}{order.frame.size ? ` — ${order.frame.size}` : ''}</div>
+              <div style={{ fontSize: '7pt', fontWeight: 800, color: '#000', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Monture</div>
+              <div style={{ fontSize: '9.5pt', fontWeight: 700 }}>{order.frame.brand} {order.frame.model}</div>
+              <div style={{ fontSize: '8.5pt', color: '#000', fontWeight: 500 }}>{order.frame.color}{order.frame.size ? ` — ${order.frame.size}` : ''}</div>
             </div>
           )}
         </div>
@@ -127,10 +147,10 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
       {/* Prescription */}
       {order.prescription && (
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '2mm', border: '1.5px solid #cbd5e1' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '2.5mm', border: '2px solid #000' }}>
           <thead>
             <tr>
-              <th style={thStyle({ textAlign: 'left' })}></th>
+              <th style={thStyle({ textAlign: 'left', width: '18%' })}></th>
               <th style={thStyle()}>Sph</th>
               <th style={thStyle()}>Cyl</th>
               <th style={thStyle()}>Axe</th>
@@ -140,15 +160,18 @@ export default function OrderSlip({ order }: OrderSlipProps) {
           <tbody>
             {order.prescription.hasVLData !== false && (
               <>
-                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 700 })}>VL OD</td><td style={tdStyle()}>{fmtRx(order.prescription.vlRightEyeSphere)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vlRightEyeCylinder)}</td><td style={tdStyle()}>{fmtAxis(order.prescription.vlRightEyeAxis)}</td><td style={tdStyle()}>-</td></tr>
-                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 700 })}>VL OS</td><td style={tdStyle()}>{fmtRx(order.prescription.vlLeftEyeSphere)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vlLeftEyeCylinder)}</td><td style={tdStyle()}>{fmtAxis(order.prescription.vlLeftEyeAxis)}</td><td style={tdStyle()}>-</td></tr>
+                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>VL OD</td><td style={tdStyle()}>{fmtRx(order.prescription.vlRightEyeSphere)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vlRightEyeCylinder)}</td><td style={tdStyle()}>{fmtAxis(order.prescription.vlRightEyeAxis)}</td><td style={tdStyle()}>-</td></tr>
+                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>VL OS</td><td style={tdStyle()}>{fmtRx(order.prescription.vlLeftEyeSphere)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vlLeftEyeCylinder)}</td><td style={tdStyle()}>{fmtAxis(order.prescription.vlLeftEyeAxis)}</td><td style={tdStyle()}>-</td></tr>
               </>
             )}
             {order.prescription.hasVPData !== false && (
               <>
-                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 700 })}>VP OD</td><td style={tdStyle()}>{fmtRx(order.prescription.vpRightEyeSphere)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vpRightEyeCylinder)}</td><td style={tdStyle()}>{fmtAxis(order.prescription.vpRightEyeAxis)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vpRightEyeAdd)}</td></tr>
-                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 700 })}>VP OS</td><td style={tdStyle()}>{fmtRx(order.prescription.vpLeftEyeSphere)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vpLeftEyeCylinder)}</td><td style={tdStyle()}>{fmtAxis(order.prescription.vpLeftEyeAxis)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vpLeftEyeAdd)}</td></tr>
+                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>VP OD</td><td style={tdStyle()}>{fmtRx(order.prescription.vpRightEyeSphere)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vpRightEyeCylinder)}</td><td style={tdStyle()}>{fmtAxis(order.prescription.vpRightEyeAxis)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vpRightEyeAdd)}</td></tr>
+                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>VP OS</td><td style={tdStyle()}>{fmtRx(order.prescription.vpLeftEyeSphere)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vpLeftEyeCylinder)}</td><td style={tdStyle()}>{fmtAxis(order.prescription.vpLeftEyeAxis)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vpLeftEyeAdd)}</td></tr>
               </>
+            )}
+            {order.prescription.pupillaryDistance && (
+              <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>EP</td><td colSpan={4} style={tdStyle({ fontWeight: 700 })}>{order.prescription.pupillaryDistance} mm</td></tr>
             )}
           </tbody>
         </table>
@@ -156,25 +179,24 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
       {/* Lens Types per eye */}
       {hasAnyLensType && (
-        <div style={{ marginBottom: '2mm' }}>
-          <div style={{ fontSize: '7pt', fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: '0.5mm' }}>Verres</div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', border: '1.5px solid #cbd5e1' }}>
+        <div style={{ marginBottom: '2.5mm' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
             <thead>
               <tr>
-                <th style={thStyle({ textAlign: 'left' })}></th>
+                <th style={thStyle({ textAlign: 'left', width: '18%' })}>Verres</th>
                 <th style={thStyle()}>OD (Droit)</th>
                 <th style={thStyle()}>OS (Gauche)</th>
               </tr>
             </thead>
             <tbody>
               {(order.vlRightEyeLensType || order.vlLeftEyeLensType) && (
-                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 700, color: '#2563eb' })}>VL</td><td style={tdStyle()}>{order.vlRightEyeLensType?.name || '-'}</td><td style={tdStyle()}>{order.vlLeftEyeLensType?.name || '-'}</td></tr>
+                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>VL</td><td style={tdStyle()}>{order.vlRightEyeLensType?.name || '-'}</td><td style={tdStyle()}>{order.vlLeftEyeLensType?.name || '-'}</td></tr>
               )}
               {(order.vpRightEyeLensType || order.vpLeftEyeLensType) && (
-                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 700, color: '#7c3aed' })}>VP</td><td style={tdStyle()}>{order.vpRightEyeLensType?.name || '-'}</td><td style={tdStyle()}>{order.vpLeftEyeLensType?.name || '-'}</td></tr>
+                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>VP</td><td style={tdStyle()}>{order.vpRightEyeLensType?.name || '-'}</td><td style={tdStyle()}>{order.vpLeftEyeLensType?.name || '-'}</td></tr>
               )}
               {!order.vlRightEyeLensType && !order.vlLeftEyeLensType && !order.vpRightEyeLensType && !order.vpLeftEyeLensType && order.lensType && (
-                <tr><td colSpan={3} style={tdStyle()}>{order.lensType.name}</td></tr>
+                <tr><td colSpan={3} style={tdStyle({ fontWeight: 700 })}>{order.lensType.name}</td></tr>
               )}
             </tbody>
           </table>
@@ -183,7 +205,7 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
       {/* Notes / Services */}
       {order.technicalNotes && (
-        <div style={{ fontSize: '8pt', color: '#334155', marginBottom: '2mm', padding: '1.2mm 2.5mm', border: '1px solid #cbd5e1' }}>
+        <div style={{ fontSize: '8.5pt', color: '#000', marginBottom: '2mm', padding: '1.5mm 3mm', border: '1.5px solid #000' }}>
           <strong>Notes / Services:</strong> {order.technicalNotes}
         </div>
       )}
@@ -195,47 +217,78 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
   // ─── BON CLIENT ────────────────────────────────────────────────
   const renderClient = () => (
-    <div style={{ fontFamily: "'Inter', 'Segoe UI', sans-serif", fontSize: '8.5pt', color: '#1a1a1a', padding: '2.5mm 4mm', height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ fontFamily: "'Inter', 'Segoe UI', sans-serif", fontSize: '9pt', color: '#000', padding: '3mm 4mm', height: '100%', display: 'flex', flexDirection: 'column' }}>
       {renderHeader('BON CLIENT')}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2mm' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2.5mm', padding: '1.5mm 3mm', border: '1.5px solid #000' }}>
         <div>
-          <div style={{ fontSize: '6.5pt', fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>Client</div>
-          <div style={{ fontWeight: 700, fontSize: '9.5pt' }}>{customerName}</div>
-          {order.customer?.phone && <div style={{ fontSize: '7.5pt', color: '#475569' }}>{order.customer.phone}</div>}
+          <div style={{ fontSize: '7pt', fontWeight: 800, color: '#000', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Client</div>
+          <div style={{ fontWeight: 800, fontSize: '10pt' }}>{customerName}</div>
+          {order.customer?.phone && <div style={{ fontSize: '8.5pt', color: '#000', fontWeight: 600 }}>{order.customer.phone}</div>}
         </div>
         <div style={{ textAlign: 'right' }}>
           {order.frame && (
             <div>
-              <div style={{ fontSize: '6.5pt', fontWeight: 700, color: '#475569', textTransform: 'uppercase' }}>Monture</div>
-              <div style={{ fontSize: '8.5pt', fontWeight: 600 }}>{order.frame.brand} {order.frame.model}</div>
-              <div style={{ fontSize: '7.5pt', color: '#475569' }}>{order.frame.color}{order.frame.size ? ` — ${order.frame.size}` : ''}</div>
+              <div style={{ fontSize: '7pt', fontWeight: 800, color: '#000', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Monture</div>
+              <div style={{ fontSize: '9pt', fontWeight: 700 }}>{order.frame.brand} {order.frame.model}</div>
+              <div style={{ fontSize: '8pt', color: '#000', fontWeight: 500 }}>{order.frame.color}{order.frame.size ? ` — ${order.frame.size}` : ''}</div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Lens Types — compact */}
+      {/* Prescription for client */}
+      {order.prescription && (
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '2.5mm', border: '2px solid #000' }}>
+          <thead>
+            <tr>
+              <th style={thStyle({ textAlign: 'left', width: '18%' })}></th>
+              <th style={thStyle()}>Sph</th>
+              <th style={thStyle()}>Cyl</th>
+              <th style={thStyle()}>Axe</th>
+              <th style={thStyle()}>Add</th>
+            </tr>
+          </thead>
+          <tbody>
+            {order.prescription.hasVLData !== false && (
+              <>
+                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>VL OD</td><td style={tdStyle()}>{fmtRx(order.prescription.vlRightEyeSphere)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vlRightEyeCylinder)}</td><td style={tdStyle()}>{fmtAxis(order.prescription.vlRightEyeAxis)}</td><td style={tdStyle()}>-</td></tr>
+                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>VL OS</td><td style={tdStyle()}>{fmtRx(order.prescription.vlLeftEyeSphere)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vlLeftEyeCylinder)}</td><td style={tdStyle()}>{fmtAxis(order.prescription.vlLeftEyeAxis)}</td><td style={tdStyle()}>-</td></tr>
+              </>
+            )}
+            {order.prescription.hasVPData !== false && (
+              <>
+                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>VP OD</td><td style={tdStyle()}>{fmtRx(order.prescription.vpRightEyeSphere)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vpRightEyeCylinder)}</td><td style={tdStyle()}>{fmtAxis(order.prescription.vpRightEyeAxis)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vpRightEyeAdd)}</td></tr>
+                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>VP OS</td><td style={tdStyle()}>{fmtRx(order.prescription.vpLeftEyeSphere)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vpLeftEyeCylinder)}</td><td style={tdStyle()}>{fmtAxis(order.prescription.vpLeftEyeAxis)}</td><td style={tdStyle()}>{fmtRx(order.prescription.vpLeftEyeAdd)}</td></tr>
+              </>
+            )}
+            {order.prescription.pupillaryDistance && (
+              <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>EP</td><td colSpan={4} style={tdStyle({ fontWeight: 700 })}>{order.prescription.pupillaryDistance} mm</td></tr>
+            )}
+          </tbody>
+        </table>
+      )}
+
+      {/* Lens Types */}
       {hasAnyLensType && (
-        <div style={{ marginBottom: '2mm' }}>
-          <div style={{ fontSize: '6.5pt', fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: '0.5mm' }}>Verres</div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', border: '1.5px solid #cbd5e1' }}>
+        <div style={{ marginBottom: '2.5mm' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
             <thead>
               <tr>
-                <th style={thStyle({ textAlign: 'left', fontSize: '7pt' })}></th>
-                <th style={thStyle({ fontSize: '7pt' })}>OD</th>
-                <th style={thStyle({ fontSize: '7pt' })}>OS</th>
+                <th style={thStyle({ textAlign: 'left', width: '18%' })}>Verres</th>
+                <th style={thStyle()}>OD (Droit)</th>
+                <th style={thStyle()}>OS (Gauche)</th>
               </tr>
             </thead>
             <tbody>
               {(order.vlRightEyeLensType || order.vlLeftEyeLensType) && (
-                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 700, color: '#2563eb', fontSize: '8pt' })}>VL</td><td style={tdStyle({ fontSize: '8pt' })}>{order.vlRightEyeLensType?.name || '-'}</td><td style={tdStyle({ fontSize: '8pt' })}>{order.vlLeftEyeLensType?.name || '-'}</td></tr>
+                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>VL</td><td style={tdStyle()}>{order.vlRightEyeLensType?.name || '-'}</td><td style={tdStyle()}>{order.vlLeftEyeLensType?.name || '-'}</td></tr>
               )}
               {(order.vpRightEyeLensType || order.vpLeftEyeLensType) && (
-                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 700, color: '#7c3aed', fontSize: '8pt' })}>VP</td><td style={tdStyle({ fontSize: '8pt' })}>{order.vpRightEyeLensType?.name || '-'}</td><td style={tdStyle({ fontSize: '8pt' })}>{order.vpLeftEyeLensType?.name || '-'}</td></tr>
+                <tr><td style={tdStyle({ textAlign: 'left', fontWeight: 800 })}>VP</td><td style={tdStyle()}>{order.vpRightEyeLensType?.name || '-'}</td><td style={tdStyle()}>{order.vpLeftEyeLensType?.name || '-'}</td></tr>
               )}
               {!order.vlRightEyeLensType && !order.vlLeftEyeLensType && !order.vpRightEyeLensType && !order.vpLeftEyeLensType && order.lensType && (
-                <tr><td colSpan={3} style={tdStyle({ fontSize: '8pt' })}>{order.lensType.name}</td></tr>
+                <tr><td colSpan={3} style={tdStyle({ fontWeight: 700 })}>{order.lensType.name}</td></tr>
               )}
             </tbody>
           </table>
@@ -249,16 +302,16 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
   return (
     <div style={{ width: '100%', maxWidth: '148mm', minHeight: '210mm', margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ height: '122mm', overflow: 'hidden' }}>
+      <div style={{ height: '108mm', overflow: 'hidden' }}>
         {renderAtelier()}
       </div>
 
-      {/* Cut line — print-safe: dashed border, no background needed */}
-      <div style={{ borderTop: '2px dashed #333', margin: '0 4mm', position: 'relative', flexShrink: 0 }}>
-        <span style={{ position: 'absolute', top: '-6pt', left: '50%', transform: 'translateX(-50)', padding: '0 2mm', fontSize: '7pt', color: '#333', fontWeight: 600 }}>✂ ── DÉCOUPER ICI ──</span>
+      {/* Cut line — print-safe: dashed border */}
+      <div style={{ borderTop: '2.5px dashed #000', margin: '0 4mm', position: 'relative', flexShrink: 0 }}>
+        <span style={{ position: 'absolute', top: '-6pt', left: '50%', transform: 'translateX(-50%)', padding: '0 3mm', fontSize: '7.5pt', color: '#000', fontWeight: 700, backgroundColor: 'white' }}>✂ ── DÉCOUPER ICI ──</span>
       </div>
 
-      <div style={{ height: '86mm', overflow: 'hidden' }}>
+      <div style={{ height: '100mm', overflow: 'hidden' }}>
         {renderClient()}
       </div>
     </div>
