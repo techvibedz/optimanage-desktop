@@ -343,8 +343,20 @@ function registerIpcHandlers() {
 
   ipcMain.handle('orders:create', async (_e, orderData: any) => {
     try {
-      if (!orderData.orderNumber) orderData.orderNumber = `ORD-${Date.now()}`
-      if (!orderData.orderNumber.startsWith('ORD-')) orderData.orderNumber = `ORD-${orderData.orderNumber}`
+      // Always compute order number server-side to avoid race conditions / duplicates
+      const allOrders = await prisma.order.findMany({
+        where: { userId: orderData.userId },
+        select: { orderNumber: true },
+      })
+      let maxNum = 0
+      for (const o of allOrders) {
+        const match = o.orderNumber?.match(/ORD-(\d+)/)
+        if (match) {
+          const num = parseInt(match[1], 10)
+          if (num > maxNum) maxNum = num
+        }
+      }
+      orderData.orderNumber = `ORD-${String(maxNum + 1).padStart(3, '0')}`
 
       // Extract relation connect fields
       const { depositAmount, frameId, ...rest } = orderData
@@ -403,12 +415,20 @@ function registerIpcHandlers() {
 
   ipcMain.handle('orders:latestNumber', async (_e, userId: string) => {
     try {
-      const order = await prisma.order.findFirst({
+      const orders = await prisma.order.findMany({
         where: { userId },
-        orderBy: { createdAt: 'desc' },
         select: { orderNumber: true },
       })
-      return { data: order?.orderNumber || null }
+      if (orders.length === 0) return { data: null }
+      let maxNum = 0
+      for (const o of orders) {
+        const match = o.orderNumber?.match(/ORD-(\d+)/)
+        if (match) {
+          const num = parseInt(match[1], 10)
+          if (num > maxNum) maxNum = num
+        }
+      }
+      return { data: maxNum > 0 ? `ORD-${String(maxNum).padStart(3, '0')}` : null }
     } catch { return { data: null } }
   })
 
