@@ -64,6 +64,9 @@ export interface ElectronAPI {
   updateUser: (id: string, updates: any) => Promise<{ data?: any; error?: string }>
   deleteUser: (id: string) => Promise<{ success?: boolean; error?: string }>
 
+  // Print
+  printSlip: () => Promise<{ success?: boolean; error?: string }>
+
   // Dashboard
   getDashboardStats: (params: any) => Promise<{ data?: any; error?: string }>
 }

@@ -306,7 +306,7 @@ export default function OrderDetailsPage() {
 
   const handlePrint = () => {
     setShowPrintSlip(true)
-    setTimeout(() => window.print(), 300)
+    setTimeout(() => window.electronAPI.printSlip(), 300)
   }
 
   if (loading) {
@@ -349,7 +349,7 @@ export default function OrderDetailsPage() {
           <div className="no-print flex items-center justify-between p-4 border-b">
             <span className="text-sm font-medium">Print Preview</span>
             <div className="flex gap-2">
-              <button onClick={() => window.print()} className="px-4 py-2 bg-primary text-white rounded-lg text-sm">Print</button>
+              <button onClick={() => window.electronAPI.printSlip()} className="px-4 py-2 bg-primary text-white rounded-lg text-sm">Print</button>
               <button onClick={() => setShowPrintSlip(false)} className="px-4 py-2 border border-border rounded-lg text-sm">Close</button>
             </div>
           </div>

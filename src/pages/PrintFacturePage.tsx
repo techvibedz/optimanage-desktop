@@ -36,7 +36,7 @@ export default function PrintFacturePage() {
     setLoading(false)
   }
 
-  const handlePrint = () => window.print()
+  const handlePrint = () => window.electronAPI.printSlip()
 
   const addExtraItem = () => {
     if (!newItem.desc || newItem.price <= 0) return

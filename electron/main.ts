@@ -92,17 +92,31 @@ app.whenReady().then(() => {
     autoUpdater.autoDownload = true
     autoUpdater.autoInstallOnAppQuit = true
 
-    // For private repos, set the GitHub token
-    const ghToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN
-    if (ghToken) {
-      autoUpdater.requestHeaders = { Authorization: `token ${ghToken}` }
-    }
+    // Private repo: always set the GitHub token for authentication
+    const ghToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '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'
+    autoUpdater.setFeedURL({
+      provider: 'github',
+      owner: 'techvibedz',
+      repo: 'optimanage-desktop',
+      private: true,
+      token: ghToken,
+    })
+
+    autoUpdater.on('checking-for-update', () => {
+      console.log('Auto-update: checking for updates...')
+    })
 
     autoUpdater.on('update-available', (info: any) => {
+      console.log('Auto-update: update available', info.version)
       mainWindow?.webContents.send('update-status', { status: 'downloading', version: info.version })
     })
 
+    autoUpdater.on('update-not-available', (info: any) => {
+      console.log('Auto-update: no update available. Current:', app.getVersion(), 'Latest:', info.version)
+    })
+
     autoUpdater.on('update-downloaded', (info: any) => {
+      console.log('Auto-update: downloaded', info.version)
       dialog.showMessageBox(mainWindow!, {
         type: 'info',
         title: 'Update Ready',
@@ -119,7 +133,10 @@ app.whenReady().then(() => {
 
     // Check for updates after 3 seconds (avoid blocking startup)
     setTimeout(() => {
-      autoUpdater.checkForUpdatesAndNotify().catch(() => {})
+      console.log('Auto-update: initiating check. App version:', app.getVersion())
+      autoUpdater.checkForUpdatesAndNotify().catch((err: any) => {
+        console.error('Auto-update check failed:', err.message)
+      })
     }, 3000)
   }
 
@@ -130,6 +147,22 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+// ─── Native Print (A5 page size) ────────────────────────────────────────────
+ipcMain.handle('print:slip', async () => {
+  if (!mainWindow) return { error: 'No window' }
+  return new Promise((resolve) => {
+    mainWindow!.webContents.print({
+      silent: false,
+      printBackground: true,
+      pageSize: { width: 148000, height: 210000 }, // A5 in microns
+      margins: { marginType: 'none' },
+    }, (success, failureReason) => {
+      if (success) resolve({ success: true })
+      else resolve({ error: failureReason || 'Print cancelled' })
+    })
+  })
 })
 
 // ─── Persistent Session ──────────────────────────────────────────────────────

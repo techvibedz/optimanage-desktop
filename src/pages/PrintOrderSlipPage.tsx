@@ -23,7 +23,7 @@ export default function PrintOrderSlipPage() {
     setLoading(false)
   }
 
-  const handlePrint = () => window.print()
+  const handlePrint = () => window.electronAPI.printSlip()
 
   if (loading) {
     return (

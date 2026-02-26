@@ -716,7 +716,7 @@ export default function CreateOrderPage() {
   }
 
   const handlePrint = () => {
-    window.print()
+    window.electronAPI.printSlip()
   }
 
   // ─── Selected prescription ──────────────────────────────────────────────

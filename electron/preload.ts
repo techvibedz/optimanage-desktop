@@ -68,6 +68,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateUser: (id: string, updates: any) => ipcRenderer.invoke('users:update', id, updates),
   deleteUser: (id: string) => ipcRenderer.invoke('users:delete', id),
 
+  // Print
+  printSlip: () => ipcRenderer.invoke('print:slip'),
+
   // Dashboard
   getDashboardStats: (params: any) => ipcRenderer.invoke('dashboard:stats', params),
 })
