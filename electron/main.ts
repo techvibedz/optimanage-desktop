@@ -574,17 +574,23 @@ function registerIpcHandlers() {
   ipcMain.handle('payments:list', async (_e, params: any) => {
     try {
       const { userId, orderId, search, startDate, endDate, paymentMethod, page = 1, limit = 10 } = params
-      const where: any = { userId }
-      if (orderId) where.orderId = orderId
-      if (startDate) where.paymentDate = { ...(where.paymentDate || {}), gte: new Date(startDate) }
-      if (endDate) where.paymentDate = { ...(where.paymentDate || {}), lte: new Date(endDate) }
-      if (paymentMethod) where.paymentMethod = { contains: paymentMethod, mode: 'insensitive' }
-      if (search) {
-        where.OR = [
-          { receiptNumber: { contains: search, mode: 'insensitive' } },
-          { reference: { contains: search, mode: 'insensitive' } },
-          { description: { contains: search, mode: 'insensitive' } },
+      const where: any = {
+        AND: [
+          { OR: [{ userId }, { order: { userId } }] },
         ]
+      }
+      if (orderId) where.AND.push({ orderId })
+      if (startDate) where.AND.push({ paymentDate: { gte: new Date(startDate) } })
+      if (endDate) where.AND.push({ paymentDate: { lte: new Date(endDate) } })
+      if (paymentMethod) where.AND.push({ paymentMethod: { contains: paymentMethod, mode: 'insensitive' } })
+      if (search) {
+        where.AND.push({
+          OR: [
+            { receiptNumber: { contains: search, mode: 'insensitive' } },
+            { reference: { contains: search, mode: 'insensitive' } },
+            { description: { contains: search, mode: 'insensitive' } },
+          ]
+        })
       }
 
       const offset = (page - 1) * limit

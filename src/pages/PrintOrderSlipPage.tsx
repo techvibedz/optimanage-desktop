@@ -49,7 +49,7 @@ export default function PrintOrderSlipPage() {
   }
 
   return (
-    <div>
+    <div className="min-h-screen overflow-auto">
       <style>{`
         @media print {
           body * { visibility: hidden; }

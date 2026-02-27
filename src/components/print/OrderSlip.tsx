@@ -56,37 +56,36 @@ export default function OrderSlip({ order }: OrderSlipProps) {
   const hasVL = order.prescription && order.prescription.hasVLData !== false
   const hasVP = order.prescription && order.prescription.hasVPData !== false
 
-  // Count prescription rows for height calculation
-  const rxRows = (hasVL ? 2 : 0) + (hasVP ? 2 : 0) + (order.prescription?.pupillaryDistance ? 1 : 0)
-  const hasLensRows = (order.vlRightEyeLensType || order.vlLeftEyeLensType ? 1 : 0) + (order.vpRightEyeLensType || order.vpLeftEyeLensType ? 1 : 0) + (!order.vlRightEyeLensType && !order.vlLeftEyeLensType && !order.vpRightEyeLensType && !order.vpLeftEyeLensType && order.lensType ? 1 : 0)
-  // Total A5 = 210mm exactly. Cut line = 2mm. Atelier + Client = 208mm.
-  const atelierMm = rxRows >= 5 ? 115 : rxRows >= 3 ? 108 : order.prescription ? 100 : 90
-  const clientMm = 208 - atelierMm
-  const atelierH = `${atelierMm}mm`
-  const clientH = `${clientMm}mm`
+  // Atelier has more content (prescription), so it gets more space.
+  // Total A5 = 210mm. Cut line = 2mm. Remaining = 208mm split proportionally.
+  const hasBoth = hasVL && hasVP
+  // Compact mode for atelier when content is dense
+  const compact = hasBoth
+  const gap = compact ? '1mm' : '2mm'
 
   // ── Shared styles ──
   const F: React.CSSProperties = { fontFamily: "'Segoe UI', Arial, sans-serif", color: '#000', boxSizing: 'border-box' }
-  const cell: React.CSSProperties = { border: '1px solid #000', padding: '1mm 1.5mm', textAlign: 'center', fontSize: '9pt', fontWeight: 700, lineHeight: '1.2' }
-  const hCell: React.CSSProperties = { ...cell, fontWeight: 800, fontSize: '8pt', borderBottom: '2px solid #000' }
+  const cellPad = compact ? '0.5mm 1mm' : '1mm 1.5mm'
+  const cell: React.CSSProperties = { border: '1px solid #000', padding: cellPad, textAlign: 'center', fontSize: compact ? '8pt' : '9pt', fontWeight: 700, lineHeight: '1.2' }
+  const hCell: React.CSSProperties = { ...cell, fontWeight: 800, fontSize: compact ? '7pt' : '8pt', borderBottom: '2px solid #000' }
 
   // ── Header ──
   const Header = ({ label }: { label: string }) => (
-    <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '2mm' }}>
+    <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: gap }}>
       <tbody>
         <tr>
-          <td style={{ verticalAlign: 'middle', width: settings.logoUrl ? '14mm' : '0' }}>
-            {settings.logoUrl && <img src={settings.logoUrl} alt="" style={{ width: '11mm', height: '11mm', objectFit: 'contain' }} />}
+          <td style={{ verticalAlign: 'middle', width: settings.logoUrl ? '12mm' : '0' }}>
+            {settings.logoUrl && <img src={settings.logoUrl} alt="" style={{ width: '10mm', height: '10mm', objectFit: 'contain' }} />}
           </td>
           <td style={{ verticalAlign: 'middle', paddingLeft: '2mm' }}>
-            <div style={{ fontSize: '11pt', fontWeight: 800, lineHeight: '1.2' }}>{settings.opticianName || 'OptiManage'}</div>
-            {settings.opticianAddress && <div style={{ fontSize: '6.5pt', color: '#444', lineHeight: '1.2', maxWidth: '50mm', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{settings.opticianAddress}</div>}
-            {settings.opticianPhone && <div style={{ fontSize: '7pt', color: '#444' }}>{settings.opticianPhone}</div>}
+            <div style={{ fontSize: '10pt', fontWeight: 800, lineHeight: '1.1' }}>{settings.opticianName || 'OptiManage'}</div>
+            {settings.opticianAddress && <div style={{ fontSize: '6pt', color: '#444', lineHeight: '1.1', maxWidth: '50mm', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{settings.opticianAddress}</div>}
+            {settings.opticianPhone && <div style={{ fontSize: '6.5pt', color: '#444' }}>{settings.opticianPhone}</div>}
           </td>
           <td style={{ verticalAlign: 'top', textAlign: 'right', whiteSpace: 'nowrap' }}>
-            <div style={{ fontSize: '7.5pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '0.5mm' }}>{label}</div>
-            <div style={{ fontSize: '14pt', fontWeight: 900, lineHeight: '1' }}>{order.orderNumber}</div>
-            <div style={{ fontSize: '7pt', color: '#555', marginTop: '0.5mm' }}>{fmtDate(order.createdAt)}</div>
+            <div style={{ fontSize: '7pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '0.3mm' }}>{label}</div>
+            <div style={{ fontSize: '12pt', fontWeight: 900, lineHeight: '1' }}>{order.orderNumber}</div>
+            <div style={{ fontSize: '6.5pt', color: '#555', marginTop: '0.3mm' }}>{fmtDate(order.createdAt)}</div>
           </td>
         </tr>
       </tbody>
@@ -95,20 +94,20 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
   // ── Info row (client + frame) ──
   const InfoRow = () => (
-    <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '2mm', border: '1px solid #000' }}>
+    <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: gap, border: '1px solid #000' }}>
       <tbody>
         <tr>
-          <td style={{ padding: '1.5mm 2mm', verticalAlign: 'top', width: '50%', borderRight: '1px solid #000' }}>
+          <td style={{ padding: '1mm 2mm', verticalAlign: 'top', width: '50%', borderRight: '1px solid #000' }}>
             <div style={{ fontSize: '6pt', fontWeight: 700, textTransform: 'uppercase', color: '#666', letterSpacing: '0.3px' }}>Client</div>
-            <div style={{ fontSize: '9pt', fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '60mm' }}>{name}</div>
-            {order.customer?.phone && <div style={{ fontSize: '7.5pt', color: '#333' }}>{order.customer.phone}</div>}
+            <div style={{ fontSize: '8.5pt', fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '60mm' }}>{name}</div>
+            {order.customer?.phone && <div style={{ fontSize: '7pt', color: '#333' }}>{order.customer.phone}</div>}
           </td>
-          <td style={{ padding: '1.5mm 2mm', verticalAlign: 'top', width: '50%' }}>
+          <td style={{ padding: '1mm 2mm', verticalAlign: 'top', width: '50%' }}>
             {order.frame ? (
               <>
                 <div style={{ fontSize: '6pt', fontWeight: 700, textTransform: 'uppercase', color: '#666', letterSpacing: '0.3px' }}>Monture</div>
-                <div style={{ fontSize: '8.5pt', fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '60mm' }}>{order.frame.brand} {order.frame.model}</div>
-                <div style={{ fontSize: '7pt', color: '#555' }}>{order.frame.color}{order.frame.size ? ` - ${order.frame.size}` : ''}</div>
+                <div style={{ fontSize: '8pt', fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '60mm' }}>{order.frame.brand} {order.frame.model}</div>
+                <div style={{ fontSize: '6.5pt', color: '#555' }}>{order.frame.color}{order.frame.size ? ` - ${order.frame.size}` : ''}</div>
               </>
             ) : (
               <div style={{ fontSize: '7pt', color: '#999' }}>Pas de monture</div>
@@ -123,7 +122,7 @@ export default function OrderSlip({ order }: OrderSlipProps) {
   const LensTable = () => {
     if (!hasLens) return null
     return (
-      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '2mm', border: '1px solid #000' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: gap, border: '1px solid #000' }}>
         <thead>
           <tr>
             <th style={{ ...hCell, width: '15%', textAlign: 'left' }}>Verres</th>
@@ -200,14 +199,14 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
   // ═══════ BON ATELIER ═══════
   const Atelier = () => (
-    <div style={{ ...F, padding: '3mm 3.5mm', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ ...F, padding: compact ? '2mm 3mm' : '3mm 3.5mm', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <Header label="BON ATELIER" />
-      <div style={{ borderBottom: '2px solid #000', marginBottom: '2mm' }} />
+      <div style={{ borderBottom: '2px solid #000', marginBottom: gap }} />
       <InfoRow />
 
       {/* Prescription — only on atelier */}
       {order.prescription && (
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '2mm', border: '1px solid #000' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: gap, border: '1px solid #000' }}>
           <thead>
             <tr>
               <th style={{ ...hCell, width: '15%', textAlign: 'left' }}></th>
@@ -268,7 +267,7 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
       {/* Notes */}
       {order.technicalNotes && (
-        <div style={{ fontSize: '7pt', border: '1px solid #000', padding: '1mm 2mm', marginBottom: '2mm', overflow: 'hidden', maxHeight: '8mm', lineHeight: '1.3' }}>
+        <div style={{ fontSize: '6.5pt', border: '1px solid #000', padding: '0.5mm 1.5mm', marginBottom: gap, overflow: 'hidden', maxHeight: '6mm', lineHeight: '1.2' }}>
           <strong>Notes:</strong> {order.technicalNotes}
         </div>
       )}
@@ -282,13 +281,13 @@ export default function OrderSlip({ order }: OrderSlipProps) {
   const Client = () => (
     <div style={{ ...F, padding: '3mm 3.5mm', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <Header label="BON CLIENT" />
-      <div style={{ borderBottom: '2px solid #000', marginBottom: '2mm' }} />
+      <div style={{ borderBottom: '2px solid #000', marginBottom: gap }} />
       <InfoRow />
       <LensTable />
 
       {/* Ready date — prominent for client */}
       {order.expectedCompletionDate && (
-        <div style={{ textAlign: 'center', border: '2px solid #000', padding: '2mm 3mm', marginBottom: '2mm', fontSize: '9pt', fontWeight: 800 }}>
+        <div style={{ textAlign: 'center', border: '2px solid #000', padding: '1.5mm 3mm', marginBottom: gap, fontSize: '8.5pt', fontWeight: 800 }}>
           Date de retrait: {fmtReady(order.expectedCompletionDate)}
         </div>
       )}
@@ -300,8 +299,8 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
   // ═══════ Layout ═══════
   return (
-    <div style={{ width: '148mm', minHeight: '210mm', maxHeight: '210mm', margin: '0 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ height: atelierH, flexShrink: 0, overflow: 'hidden' }}>
+    <div style={{ width: '148mm', height: '210mm', margin: '0 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: hasBoth ? '1.15 1 0%' : '1 1 0%', overflow: 'hidden' }}>
         <Atelier />
       </div>
 
@@ -311,7 +310,7 @@ export default function OrderSlip({ order }: OrderSlipProps) {
         <div style={{ flex: 1, borderTop: '1.5px dashed #000' }} />
       </div>
 
-      <div style={{ height: clientH, flexShrink: 0, overflow: 'hidden' }}>
+      <div style={{ flex: hasBoth ? '0.85 1 0%' : '1 1 0%', overflow: 'hidden' }}>
         <Client />
       </div>
     </div>

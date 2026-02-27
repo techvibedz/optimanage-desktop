@@ -426,30 +426,8 @@ export default function AlgerianFacture({ order, onClose }: AlgerianFactureProps
         </div>
 
         {/* Summary Section */}
-        <div className="summary-grid" style={{ gridTemplateColumns: order.payments && order.payments.length > 0 ? '1fr 1.8fr' : '1fr' }}>
-          {order.payments && order.payments.length > 0 && (
-            <div className="payment-history">
-              <div className="section-title">Historique des Paiements</div>
-              <table className="payment-table">
-                <thead><tr><th>Date</th><th>Méthode</th><th>Réf.</th><th>Montant</th></tr></thead>
-                <tbody>
-                  {order.payments.map((payment) => (
-                    <tr key={payment.id}>
-                      <td>{formatDate(payment.paymentDate)}</td>
-                      <td>{payment.paymentMethod}</td>
-                      <td>{payment.receiptNumber || '-'}</td>
-                      <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatCurrency(payment.amount)}</td>
-                    </tr>
-                  ))}
-                  <tr style={{ borderTop: '2px solid #e2e8f0', fontWeight: 'bold' }}>
-                    <td colSpan={3} style={{ textAlign: 'right', paddingRight: '8px' }}>Total reçu:</td>
-                    <td style={{ textAlign: 'right', color: '#059669' }}>{formatCurrency(totalPaid)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
-          <div className="totals-card" style={{ gridColumn: order.payments && order.payments.length > 0 ? 'auto' : '1 / -1' }}>
+        <div style={{ marginBottom: '4mm' }}>
+          <div className="totals-card">
             <div className="totals-title">Récapitulatif</div>
             <div className="totals-row final">
               <span>Total TTC</span>
