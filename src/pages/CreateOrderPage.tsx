@@ -440,6 +440,9 @@ export default function CreateOrderPage() {
   const cameraVideoRef = useRef<HTMLVideoElement>(null)
   const cameraStreamRef = useRef<MediaStream | null>(null)
   const cameraCanvasRef = useRef<HTMLCanvasElement>(null)
+  const [autoScanStatus, setAutoScanStatus] = useState<'idle' | 'scanning' | 'analyzing' | 'found'>('idle')
+  const autoScanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const autoScanActiveRef = useRef(false)
 
   // Order number
   const [orderNumber, setOrderNumber] = useState('')
@@ -702,21 +705,118 @@ export default function CreateOrderPage() {
     await processAiScan(base64)
   }
 
-  // ── Live Camera Scanner ─────────────────────────────────────────────────
+  // ── Live Camera Scanner with Auto-Detection ──────────────────────────────
+  const captureFrame = (): string | null => {
+    const video = cameraVideoRef.current
+    const canvas = cameraCanvasRef.current
+    if (!video || !canvas || video.videoWidth === 0) return null
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/jpeg', 0.90)
+  }
+
+  const stopAutoScan = () => {
+    autoScanActiveRef.current = false
+    if (autoScanTimerRef.current) {
+      clearTimeout(autoScanTimerRef.current)
+      autoScanTimerRef.current = null
+    }
+  }
+
+  const startAutoScan = () => {
+    autoScanActiveRef.current = true
+    setAutoScanStatus('scanning')
+    scheduleNextScan()
+  }
+
+  const scheduleNextScan = () => {
+    if (!autoScanActiveRef.current) return
+    autoScanTimerRef.current = setTimeout(async () => {
+      if (!autoScanActiveRef.current) return
+      const base64 = captureFrame()
+      if (!base64) { scheduleNextScan(); return }
+
+      setAutoScanStatus('analyzing')
+      try {
+        const res = await window.electronAPI.scanOrdonnance(base64)
+        if (!autoScanActiveRef.current) return
+
+        if (res.data && !res.error) {
+          const d = res.data
+          const hasVL = !!(d.vlRightEyeSphere || d.vlLeftEyeSphere || d.vlRightEyeCylinder || d.vlLeftEyeCylinder)
+          const hasVP = !!(d.vpRightEyeSphere || d.vpLeftEyeSphere || d.vpRightEyeCylinder || d.vpLeftEyeCylinder || d.vpRightEyeAddition || d.vpLeftEyeAddition)
+          const hasAnyData = hasVL || hasVP
+
+          if (hasAnyData) {
+            setAutoScanStatus('found')
+            stopAutoScan()
+            // Brief flash of "found" state before closing
+            await new Promise(r => setTimeout(r, 800))
+            closeCameraModal()
+            // Fill prescription
+            setIsScanning(true)
+            try {
+              setShowNewRxForm(true)
+              setNewRxHasVL(hasVL)
+              setNewRxHasVP(hasVP)
+              if (hasVL) {
+                setNewRxVLRightSph(d.vlRightEyeSphere || '0.00')
+                setNewRxVLRightCyl(d.vlRightEyeCylinder || '0.00')
+                setNewRxVLRightAxis(d.vlRightEyeAxis || '')
+                setNewRxVLLeftSph(d.vlLeftEyeSphere || '0.00')
+                setNewRxVLLeftCyl(d.vlLeftEyeCylinder || '0.00')
+                setNewRxVLLeftAxis(d.vlLeftEyeAxis || '')
+              }
+              if (hasVP) {
+                setNewRxVPRightSph(d.vpRightEyeSphere || '0.00')
+                setNewRxVPRightCyl(d.vpRightEyeCylinder || '0.00')
+                setNewRxVPRightAxis(d.vpRightEyeAxis || '')
+                setNewRxVPRightAdd(d.vpRightEyeAddition || '')
+                setNewRxVPLeftSph(d.vpLeftEyeSphere || '0.00')
+                setNewRxVPLeftCyl(d.vpLeftEyeCylinder || '0.00')
+                setNewRxVPLeftAxis(d.vpLeftEyeAxis || '')
+                setNewRxVPLeftAdd(d.vpLeftEyeAddition || '')
+              }
+              if (d.pupillaryDistance) setNewRxPD(d.pupillaryDistance)
+              toast.success('Ordonnance détectée automatiquement !', {
+                description: `${hasVL ? 'VL' : ''}${hasVL && hasVP ? ' + ' : ''}${hasVP ? 'VP' : ''} détectés. Vérifiez les valeurs.`,
+              })
+            } finally { setIsScanning(false) }
+            return
+          }
+        }
+        // Not found yet — keep scanning
+        setAutoScanStatus('scanning')
+        scheduleNextScan()
+      } catch {
+        // API error — retry after delay
+        if (autoScanActiveRef.current) {
+          setAutoScanStatus('scanning')
+          scheduleNextScan()
+        }
+      }
+    }, 4000)
+  }
+
   const openCameraModal = async () => {
     setShowCameraModal(true)
+    setAutoScanStatus('idle')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
       })
       cameraStreamRef.current = stream
-      // Wait for the video element to mount
       setTimeout(() => {
         if (cameraVideoRef.current) {
           cameraVideoRef.current.srcObject = stream
           cameraVideoRef.current.play()
         }
-      }, 100)
+        // Start auto-scan after camera is ready
+        startAutoScan()
+      }, 500)
     } catch (err: any) {
       toast.error('Impossible d\'accéder à la caméra: ' + (err.message || 'Permission refusée'))
       setShowCameraModal(false)
@@ -724,31 +824,20 @@ export default function CreateOrderPage() {
   }
 
   const closeCameraModal = () => {
+    stopAutoScan()
     if (cameraStreamRef.current) {
       cameraStreamRef.current.getTracks().forEach(t => t.stop())
       cameraStreamRef.current = null
     }
+    setAutoScanStatus('idle')
     setShowCameraModal(false)
   }
 
   const captureAndScan = async () => {
-    const video = cameraVideoRef.current
-    const canvas = cameraCanvasRef.current
-    if (!video || !canvas) return
-
-    // Capture frame at video resolution
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-
-    // Convert to high-quality JPEG base64
-    const base64 = canvas.toDataURL('image/jpeg', 0.92)
-
-    // Close camera before processing
+    stopAutoScan()
+    const base64 = captureFrame()
+    if (!base64) return
     closeCameraModal()
-
     await processAiScan(base64)
   }
 
@@ -1655,6 +1744,33 @@ export default function CreateOrderPage() {
       {/* ── Live Camera Scanner Modal ─────────────────────────────────────── */}
       {showCameraModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <style>{`
+            @keyframes scanLine {
+              0% { top: 15%; }
+              50% { top: 75%; }
+              100% { top: 15%; }
+            }
+            .scan-line-anim {
+              animation: scanLine 2.5s ease-in-out infinite;
+            }
+            @keyframes pulseGlow {
+              0%, 100% { box-shadow: 0 0 8px rgba(16,185,129,0.3); }
+              50% { box-shadow: 0 0 20px rgba(16,185,129,0.6); }
+            }
+            .scan-frame-active {
+              animation: pulseGlow 2s ease-in-out infinite;
+            }
+            @keyframes foundFlash {
+              0% { border-color: rgba(16,185,129,0.6); }
+              50% { border-color: rgba(16,185,129,1); }
+              100% { border-color: rgba(16,185,129,0.6); }
+            }
+            .scan-frame-found {
+              animation: foundFlash 0.4s ease-in-out 3;
+              border-style: solid !important;
+              border-color: #10b981 !important;
+            }
+          `}</style>
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20">
@@ -1662,9 +1778,30 @@ export default function CreateOrderPage() {
                 <Video className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 <span className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">Scanner Live — Ordonnance</span>
               </div>
-              <button onClick={closeCameraModal} className="p-1.5 hover:bg-white/60 dark:hover:bg-gray-800 rounded-lg transition-colors">
-                <X className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                {/* Auto-scan status badge */}
+                {autoScanStatus === 'scanning' && (
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    Recherche auto...
+                  </span>
+                )}
+                {autoScanStatus === 'analyzing' && (
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Analyse en cours...
+                  </span>
+                )}
+                {autoScanStatus === 'found' && (
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
+                    <Check className="h-3 w-3" />
+                    Ordonnance détectée !
+                  </span>
+                )}
+                <button onClick={closeCameraModal} className="p-1.5 hover:bg-white/60 dark:hover:bg-gray-800 rounded-lg transition-colors">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
 
             {/* Video Preview */}
@@ -1676,32 +1813,65 @@ export default function CreateOrderPage() {
                 muted
                 className="w-full max-h-[60vh] object-contain"
               />
-              {/* Scanning overlay guide */}
+              {/* Scanning overlay */}
               <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                <div className="border-2 border-dashed border-emerald-400/60 rounded-lg" style={{ width: '80%', height: '70%' }}>
-                  <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-3 py-1 rounded-full">
-                    Placez l'ordonnance dans le cadre
+                <div
+                  className={`border-2 border-dashed rounded-lg relative ${
+                    autoScanStatus === 'found'
+                      ? 'scan-frame-found'
+                      : autoScanStatus === 'analyzing'
+                      ? 'border-amber-400/80 scan-frame-active'
+                      : 'border-emerald-400/60 scan-frame-active'
+                  }`}
+                  style={{ width: '80%', height: '70%' }}
+                >
+                  {/* Animated scan line */}
+                  {(autoScanStatus === 'scanning' || autoScanStatus === 'analyzing') && (
+                    <div
+                      className="scan-line-anim absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent"
+                      style={{ position: 'absolute' }}
+                    />
+                  )}
+                  {/* Status label */}
+                  <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1.5">
+                    {autoScanStatus === 'found' ? (
+                      <><Check className="h-3 w-3 text-emerald-400" /> Ordonnance trouvée !</>
+                    ) : autoScanStatus === 'analyzing' ? (
+                      <><Loader2 className="h-3 w-3 animate-spin text-amber-400" /> Analyse de l'image...</>
+                    ) : (
+                      <>Placez l'ordonnance dans le cadre</>
+                    )}
                   </div>
+                  {/* Corner decorations */}
+                  <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-emerald-400 rounded-tl" />
+                  <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-emerald-400 rounded-tr" />
+                  <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-emerald-400 rounded-bl" />
+                  <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-emerald-400 rounded-br" />
                 </div>
               </div>
             </div>
 
             {/* Actions */}
-            <div className="flex items-center justify-center gap-3 px-5 py-4 bg-gray-50 dark:bg-gray-800/50">
-              <button
-                onClick={closeCameraModal}
-                className="px-4 py-2.5 text-sm font-medium rounded-lg border border-border hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-              >
-                Annuler
-              </button>
-              <button
-                onClick={captureAndScan}
-                disabled={isScanning}
-                className="flex items-center gap-2 px-6 py-2.5 text-sm font-semibold rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg shadow-emerald-500/25 transition-all duration-200 disabled:opacity-60"
-              >
-                {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-                Capturer & Analyser
-              </button>
+            <div className="flex items-center justify-between px-5 py-3 bg-gray-50 dark:bg-gray-800/50">
+              <p className="text-xs text-muted-foreground">
+                Détection automatique active — ou capturez manuellement
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={closeCameraModal}
+                  className="px-3.5 py-2 text-xs font-medium rounded-lg border border-border hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={captureAndScan}
+                  disabled={isScanning || autoScanStatus === 'analyzing'}
+                  className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg shadow-emerald-500/25 transition-all duration-200 disabled:opacity-60"
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                  Capture manuelle
+                </button>
+              </div>
             </div>
           </div>
           {/* Hidden canvas for capture */}
