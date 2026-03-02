@@ -895,16 +895,14 @@ function registerIpcHandlers() {
 
 // ── AI: Scan Ordonnance (Gemini Vision) ──────────────────────────────────
 function registerAiHandlers() {
-  const GEMINI_API_KEY = 'AIzaSyCeEnDyNSUhClIEOn-We92pbzqs5ZwetmE'
+  // Multiple keys for quota rotation; multiple models as fallback
+  const GEMINI_KEYS = [
+    'AIzaSyCeEnDyNSUhClIEOn-We92pbzqs5ZwetmE',
+    'AIzaSyCm8uRzrxTgPiNDz9RC7oMkJrQNfw-TUDY',
+  ]
+  const GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash']
 
-  ipcMain.handle('ai:scanOrdonnance', async (_e, imageBase64: string) => {
-    try {
-      if (!GEMINI_API_KEY) return { error: 'AI API key not configured. Set AI_API_KEY in environment.' }
-
-      // Strip data URI prefix if present
-      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '').replace(/^data:application\/pdf;base64,/, '')
-
-      const systemPrompt = `You are an expert Algerian ophthalmology assistant specializing in reading optical prescriptions (ordonnances).
+  const systemPrompt = `You are an expert Algerian ophthalmology assistant specializing in reading optical prescriptions (ordonnances).
 
 Your task: Analyze the provided prescription image and extract ALL optical correction values.
 
@@ -943,61 +941,87 @@ You MUST respond with ONLY a valid JSON object, no markdown, no explanation, no 
   "pupillaryDistance": string | null
 }`
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`
+  // Helper: single Gemini API call
+  async function callGemini(apiKey: string, model: string, base64Data: string): Promise<string> {
+    const https = await import('node:https')
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+    const payload = {
+      contents: [{ parts: [
+        { text: systemPrompt },
+        { inlineData: { mimeType: 'image/jpeg', data: base64Data } }
+      ] }],
+      generationConfig: { temperature: 0.1, maxOutputTokens: 1024 }
+    }
+    return new Promise((resolve, reject) => {
+      const body = JSON.stringify(payload)
+      const urlObj = new URL(url)
+      const req = https.request({
+        hostname: urlObj.hostname,
+        path: urlObj.pathname + urlObj.search,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        timeout: 60000,
+      }, (res) => {
+        let data = ''
+        res.on('data', (chunk: string) => { data += chunk })
+        res.on('end', () => {
+          if (res.statusCode === 429) {
+            reject(new Error('RATE_LIMITED'))
+          } else if (res.statusCode && res.statusCode >= 400) {
+            reject(new Error(`Gemini API error ${res.statusCode}: ${data.slice(0, 300)}`))
+          } else {
+            resolve(data)
+          }
+        })
+      })
+      req.on('timeout', () => { req.destroy(); reject(new Error('Gemini API request timed out (60s)')) })
+      req.on('error', (e: Error) => reject(e))
+      req.write(body)
+      req.end()
+    })
+  }
 
-      const payload = {
-        contents: [{
-          parts: [
-            { text: systemPrompt },
-            { inlineData: { mimeType: 'image/jpeg', data: base64Data } }
-          ]
-        }],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 1024,
+  ipcMain.handle('ai:scanOrdonnance', async (_e, imageBase64: string) => {
+    try {
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '').replace(/^data:application\/pdf;base64,/, '')
+
+      // Try each key × model combo, with retry+backoff on 429
+      let lastError = ''
+      for (const apiKey of GEMINI_KEYS) {
+        for (const model of GEMINI_MODELS) {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            try {
+              if (attempt > 0) {
+                // Exponential backoff: 2s, 5s
+                const delay = attempt === 1 ? 2000 : 5000
+                console.log(`AI scan: retry ${attempt} for ${model} (waiting ${delay}ms)...`)
+                await new Promise(r => setTimeout(r, delay))
+              }
+              const responseText = await callGemini(apiKey, model, base64Data)
+              const geminiResponse = JSON.parse(responseText)
+              const textContent = geminiResponse?.candidates?.[0]?.content?.parts?.[0]?.text
+              if (!textContent) continue
+
+              let jsonStr = textContent.trim()
+              const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/)
+              if (jsonMatch) jsonStr = jsonMatch[1].trim()
+
+              const parsed = JSON.parse(jsonStr)
+              return { data: parsed }
+            } catch (err: any) {
+              lastError = err.message || 'Unknown error'
+              if (err.message === 'RATE_LIMITED') {
+                console.log(`AI scan: 429 rate limited on key ...${apiKey.slice(-6)} / ${model}, attempt ${attempt + 1}`)
+                continue // retry or next combo
+              }
+              // Non-429 error: break retries, try next model/key
+              break
+            }
+          }
         }
       }
 
-      // Use Node.js native https
-      const https = await import('node:https')
-      const responseText: string = await new Promise((resolve, reject) => {
-        const body = JSON.stringify(payload)
-        const urlObj = new URL(url)
-        const req = https.request({
-          hostname: urlObj.hostname,
-          path: urlObj.pathname + urlObj.search,
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-          timeout: 60000,
-        }, (res) => {
-          let data = ''
-          res.on('data', (chunk: string) => { data += chunk })
-          res.on('end', () => {
-            if (res.statusCode && res.statusCode >= 400) {
-              reject(new Error(`Gemini API error ${res.statusCode}: ${data.slice(0, 300)}`))
-            } else {
-              resolve(data)
-            }
-          })
-        })
-        req.on('timeout', () => { req.destroy(); reject(new Error('Gemini API request timed out (60s)')) })
-        req.on('error', (e: Error) => reject(e))
-        req.write(body)
-        req.end()
-      })
-
-      const geminiResponse = JSON.parse(responseText)
-      const textContent = geminiResponse?.candidates?.[0]?.content?.parts?.[0]?.text
-      if (!textContent) return { error: 'AI returned an empty response. Try a clearer image.' }
-
-      // Extract JSON from potential markdown wrapping
-      let jsonStr = textContent.trim()
-      const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/)
-      if (jsonMatch) jsonStr = jsonMatch[1].trim()
-
-      // Parse and validate
-      const parsed = JSON.parse(jsonStr)
-      return { data: parsed }
+      return { error: `Tous les modèles AI sont temporairement indisponibles (quota dépassé). Réessayez dans quelques minutes. Détail: ${lastError}` }
     } catch (err: any) {
       console.error('AI scan error:', err)
       return { error: err.message || 'Failed to scan prescription image' }
