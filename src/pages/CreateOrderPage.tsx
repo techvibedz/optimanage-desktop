@@ -705,7 +705,10 @@ export default function CreateOrderPage() {
     await processAiScan(base64)
   }
 
-  // ── Live Camera Scanner with Auto-Detection ──────────────────────────────
+  // ── Live Camera Scanner with Smart Auto-Detection ──────────────────────
+  // Phase 1: Fast local check every 500ms — detect if a document/paper is visible
+  // Phase 2: Only when document detected → send to AI for full prescription extraction
+
   const captureFrame = (): string | null => {
     const video = cameraVideoRef.current
     const canvas = cameraCanvasRef.current
@@ -716,6 +719,49 @@ export default function CreateOrderPage() {
     if (!ctx) return null
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
     return canvas.toDataURL('image/jpeg', 0.90)
+  }
+
+  // Fast local document detection using edge density analysis
+  // Returns true if the center of the frame has enough edges (text/lines on paper)
+  const detectDocumentInFrame = (): boolean => {
+    const video = cameraVideoRef.current
+    const canvas = cameraCanvasRef.current
+    if (!video || !canvas || video.videoWidth === 0) return false
+    // Use a small resolution for speed
+    const w = 320
+    const h = Math.round(w * (video.videoHeight / video.videoWidth))
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return false
+    ctx.drawImage(video, 0, 0, w, h)
+
+    // Analyze the center 60% of the image (where the document should be)
+    const cx = Math.round(w * 0.2), cy = Math.round(h * 0.2)
+    const cw = Math.round(w * 0.6), ch = Math.round(h * 0.6)
+    const imgData = ctx.getImageData(cx, cy, cw, ch)
+    const pixels = imgData.data
+
+    // Convert to grayscale and compute edge density (simple Sobel-like horizontal gradient)
+    let edgeCount = 0
+    const stride = cw * 4
+    for (let y = 1; y < ch - 1; y++) {
+      for (let x = 1; x < cw - 1; x++) {
+        const i = (y * cw + x) * 4
+        const gray = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114
+        const grayRight = pixels[i + 4] * 0.299 + pixels[i + 5] * 0.587 + pixels[i + 6] * 0.114
+        const grayBelow = pixels[i + stride] * 0.299 + pixels[i + stride + 1] * 0.587 + pixels[i + stride + 2] * 0.114
+        const gx = Math.abs(gray - grayRight)
+        const gy = Math.abs(gray - grayBelow)
+        if (gx + gy > 30) edgeCount++
+      }
+    }
+
+    const totalPixels = (cw - 2) * (ch - 2)
+    const edgeDensity = edgeCount / totalPixels
+
+    // A blank wall/hand has ~2-5% edges. A document with text has ~12-30%+
+    return edgeDensity > 0.08
   }
 
   const stopAutoScan = () => {
@@ -729,15 +775,36 @@ export default function CreateOrderPage() {
   const startAutoScan = () => {
     autoScanActiveRef.current = true
     setAutoScanStatus('scanning')
-    scheduleNextScan()
+    runDetectionLoop()
   }
 
-  const scheduleNextScan = () => {
+  // Fast detection loop — checks for document every 500ms, only calls AI when found
+  const runDetectionLoop = () => {
     if (!autoScanActiveRef.current) return
     autoScanTimerRef.current = setTimeout(async () => {
       if (!autoScanActiveRef.current) return
-      const base64 = captureFrame()
-      if (!base64) { scheduleNextScan(); return }
+
+      // Phase 1: Quick local check
+      const hasDocument = detectDocumentInFrame()
+
+      if (!hasDocument) {
+        // Nothing visible — keep checking fast
+        setAutoScanStatus('scanning')
+        runDetectionLoop()
+        return
+      }
+
+      // Phase 2: Document detected! Capture full-res and send to AI
+      // Re-capture at full resolution for AI
+      const video = cameraVideoRef.current
+      const canvas = cameraCanvasRef.current
+      if (!video || !canvas) { runDetectionLoop(); return }
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      const ctx = canvas.getContext('2d')
+      if (!ctx) { runDetectionLoop(); return }
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+      const base64 = canvas.toDataURL('image/jpeg', 0.92)
 
       setAutoScanStatus('analyzing')
       try {
@@ -748,15 +815,12 @@ export default function CreateOrderPage() {
           const d = res.data
           const hasVL = !!(d.vlRightEyeSphere || d.vlLeftEyeSphere || d.vlRightEyeCylinder || d.vlLeftEyeCylinder)
           const hasVP = !!(d.vpRightEyeSphere || d.vpLeftEyeSphere || d.vpRightEyeCylinder || d.vpLeftEyeCylinder || d.vpRightEyeAddition || d.vpLeftEyeAddition)
-          const hasAnyData = hasVL || hasVP
 
-          if (hasAnyData) {
+          if (hasVL || hasVP) {
             setAutoScanStatus('found')
             stopAutoScan()
-            // Brief flash of "found" state before closing
-            await new Promise(r => setTimeout(r, 800))
+            await new Promise(r => setTimeout(r, 600))
             closeCameraModal()
-            // Fill prescription
             setIsScanning(true)
             try {
               setShowNewRxForm(true)
@@ -788,17 +852,16 @@ export default function CreateOrderPage() {
             return
           }
         }
-        // Not found yet — keep scanning
+        // AI didn't find prescription data — resume detection
         setAutoScanStatus('scanning')
-        scheduleNextScan()
+        runDetectionLoop()
       } catch {
-        // API error — retry after delay
         if (autoScanActiveRef.current) {
           setAutoScanStatus('scanning')
-          scheduleNextScan()
+          runDetectionLoop()
         }
       }
-    }, 4000)
+    }, 500)
   }
 
   const openCameraModal = async () => {
@@ -814,7 +877,6 @@ export default function CreateOrderPage() {
           cameraVideoRef.current.srcObject = stream
           cameraVideoRef.current.play()
         }
-        // Start auto-scan after camera is ready
         startAutoScan()
       }, 500)
     } catch (err: any) {
@@ -835,8 +897,15 @@ export default function CreateOrderPage() {
 
   const captureAndScan = async () => {
     stopAutoScan()
-    const base64 = captureFrame()
-    if (!base64) return
+    const video = cameraVideoRef.current
+    const canvas = cameraCanvasRef.current
+    if (!video || !canvas) return
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+    const base64 = canvas.toDataURL('image/jpeg', 0.92)
     closeCameraModal()
     await processAiScan(base64)
   }
