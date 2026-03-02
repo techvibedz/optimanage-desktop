@@ -27,7 +27,7 @@ export default function PrintOrderSlipPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[80vh]">
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6' }}>
         <Loader2 className="h-6 w-6 animate-spin text-primary" />
         <span className="ml-3 text-sm text-muted-foreground">{t('common.loading') || 'Loading...'}</span>
       </div>
@@ -36,7 +36,7 @@ export default function PrintOrderSlipPage() {
 
   if (!order) {
     return (
-      <div className="flex items-center justify-center h-[80vh]">
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f3f4f6' }}>
         <div className="text-center">
           <h2 className="text-xl font-semibold text-red-600 mb-2">{t('common.error') || 'Error'}</h2>
           <p className="text-muted-foreground">{t('orders.notFound') || 'Order not found'}</p>
@@ -49,46 +49,57 @@ export default function PrintOrderSlipPage() {
   }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <>
       <style>{`
+        .slip-page { height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: #f3f4f6; }
+        .dark .slip-page { background: #0a0a0f; }
+        .slip-toolbar { flex-shrink: 0; }
+        .slip-scroll { flex: 1; overflow-y: auto; }
+        .print-slip-target { position: absolute; left: -9999px; top: 0; width: 148mm; }
         @media print {
           body * { visibility: hidden; }
-          .print-slip-content, .print-slip-content * { visibility: visible; }
-          .print-slip-content { position: absolute; left: 0; top: 0; width: 100%; }
-          .no-print { display: none !important; }
+          .print-slip-target, .print-slip-target * { visibility: visible; }
+          .print-slip-target { position: absolute; left: 0; top: 0; width: 100%; }
+          .no-print, .slip-page { display: none !important; }
           @page { size: A5 portrait; margin: 0; }
         }
       `}</style>
 
-      {/* Top bar */}
-      <div className="no-print flex-shrink-0 bg-white dark:bg-gray-900 border-b border-border px-6 py-3 flex items-center justify-between z-10">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="p-2 border border-border rounded-lg hover:bg-muted transition-colors">
-            <ArrowLeft className="h-4 w-4" />
-          </button>
-          <div>
-            <h1 className="text-base font-semibold">{t('orders.orderSlip') || 'Order Slip'} — {order.orderNumber}</h1>
-            <p className="text-xs text-muted-foreground">{t('print.a5Instructions') || 'Print on A5 portrait paper. Top = workshop, Bottom = client.'}</p>
+      <div className="slip-page">
+        {/* Toolbar */}
+        <div className="slip-toolbar no-print" style={{ background: 'white', borderBottom: '1px solid #e5e7eb', padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button onClick={() => navigate(-1)} style={{ padding: '8px', border: '1px solid #e5e7eb', borderRadius: '8px', background: 'transparent', cursor: 'pointer', display: 'flex' }}>
+              <ArrowLeft style={{ width: 16, height: 16 }} />
+            </button>
+            <div>
+              <h1 style={{ fontSize: '15px', fontWeight: 600, margin: 0 }}>
+                {t('orders.orderSlip') || 'Print Preview'} — {order.orderNumber}
+              </h1>
+              <p style={{ fontSize: '12px', color: '#6b7280', margin: 0 }}>
+                {t('print.a5Instructions') || 'A5 portrait · Top = Atelier · Bottom = Client'}
+              </p>
+            </div>
           </div>
+          <button onClick={handlePrint} style={{ padding: '8px 20px', background: '#7c3aed', color: 'white', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Printer style={{ width: 16, height: 16 }} /> {t('common.print') || 'Print'}
+          </button>
         </div>
-        <button onClick={handlePrint} className="px-5 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 text-sm font-medium flex items-center gap-2 transition-colors">
-          <Printer className="h-4 w-4" /> {t('common.print') || 'Print'}
-        </button>
-      </div>
 
-      {/* Preview — scrollable area */}
-      <div className="no-print flex-1 overflow-auto bg-gray-100 dark:bg-gray-950">
-        <div className="flex justify-center py-8 px-4">
-          <div className="print-slip-content bg-white rounded-sm shadow-lg" style={{ width: '148mm', minHeight: '210mm' }}>
-            <OrderSlip order={order} />
+        {/* Scrollable preview */}
+        <div className="slip-scroll no-print">
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '32px 16px 64px' }}>
+            <div style={{ width: '148mm', minHeight: '210mm', background: 'white', boxShadow: '0 4px 24px rgba(0,0,0,0.12)', borderRadius: '4px' }}>
+              <OrderSlip order={order} />
+            </div>
           </div>
         </div>
       </div>
 
       {/* Actual print target (hidden on screen, visible on print) */}
-      <div className="print-slip-content hidden print:block">
+      <div className="print-slip-target">
         <OrderSlip order={order} />
       </div>
-    </div>
+    </>
   )
 }
