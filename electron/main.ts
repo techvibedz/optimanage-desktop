@@ -897,10 +897,11 @@ function registerIpcHandlers() {
 function registerAiHandlers() {
   const OPENROUTER_API_KEY = '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'
   // Free vision models on OpenRouter (best first)
+  // Vision-capable models (cheapest first, openrouter/free auto-routes to free endpoints)
   const OPENROUTER_MODELS = [
-    'google/gemini-2.0-flash-exp:free',
-    'google/gemini-2.0-flash-thinking-exp:free',
-    'meta-llama/llama-4-maverick:free',
+    'openrouter/free',
+    'google/gemini-2.5-flash-lite',
+    'bytedance-seed/seed-1.6-flash',
   ]
 
   const systemPrompt = `You are an expert Algerian ophthalmology assistant specializing in reading optical prescriptions (ordonnances).

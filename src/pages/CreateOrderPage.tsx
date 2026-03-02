@@ -5,7 +5,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { toast } from 'sonner'
 import {
   Plus, Trash2, X, Printer, Search,
-  ChevronDown, Check, FileText, ScanLine, Loader2
+  ChevronDown, Check, FileText, ScanLine, Loader2, Camera, Video
 } from 'lucide-react'
 import OrderSlip from '@/components/print/OrderSlip'
 
@@ -436,6 +436,10 @@ export default function CreateOrderPage() {
   const printRef = useRef<HTMLDivElement>(null)
   const [isScanning, setIsScanning] = useState(false)
   const scanInputRef = useRef<HTMLInputElement>(null)
+  const [showCameraModal, setShowCameraModal] = useState(false)
+  const cameraVideoRef = useRef<HTMLVideoElement>(null)
+  const cameraStreamRef = useRef<MediaStream | null>(null)
+  const cameraCanvasRef = useRef<HTMLCanvasElement>(null)
 
   // Order number
   const [orderNumber, setOrderNumber] = useState('')
@@ -630,56 +634,25 @@ export default function CreateOrderPage() {
     finally { setNewRxCreating(false) }
   }
 
-  const handleScanOrdonnance = async () => {
-    // Trigger hidden file input
-    scanInputRef.current?.click()
-  }
-
-  const handleScanFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    // Reset the input so the same file can be re-selected
-    e.target.value = ''
-
+  // Shared: send base64 image to AI and fill prescription form
+  const processAiScan = async (base64: string) => {
     setIsScanning(true)
     try {
-      // Read file as base64
-      const base64: string = await new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => {
-          const result = reader.result as string
-          resolve(result)
-        }
-        reader.onerror = () => reject(new Error('Failed to read file'))
-        reader.readAsDataURL(file)
-      })
-
       toast.info('Analyse de l\'ordonnance en cours...', { duration: 3000 })
       const res = await window.electronAPI.scanOrdonnance(base64)
 
-      if (res.error) {
-        toast.error(`Erreur AI: ${res.error}`)
-        return
-      }
-
-      if (!res.data) {
-        toast.error('Aucune donnée extraite de l\'image')
-        return
-      }
+      if (res.error) { toast.error(`Erreur AI: ${res.error}`); return }
+      if (!res.data) { toast.error('Aucune donnée extraite de l\'image'); return }
 
       const d = res.data
-
-      // Open the prescription form and fill values
       setShowNewRxForm(true)
 
-      // Determine which sections have data
       const hasVL = !!(d.vlRightEyeSphere || d.vlLeftEyeSphere || d.vlRightEyeCylinder || d.vlLeftEyeCylinder)
       const hasVP = !!(d.vpRightEyeSphere || d.vpLeftEyeSphere || d.vpRightEyeCylinder || d.vpLeftEyeCylinder || d.vpRightEyeAddition || d.vpLeftEyeAddition)
 
       setNewRxHasVL(hasVL)
       setNewRxHasVP(hasVP)
 
-      // VL values
       if (hasVL) {
         setNewRxVLRightSph(d.vlRightEyeSphere || '0.00')
         setNewRxVLRightCyl(d.vlRightEyeCylinder || '0.00')
@@ -689,7 +662,6 @@ export default function CreateOrderPage() {
         setNewRxVLLeftAxis(d.vlLeftEyeAxis || '')
       }
 
-      // VP values
       if (hasVP) {
         setNewRxVPRightSph(d.vpRightEyeSphere || '0.00')
         setNewRxVPRightCyl(d.vpRightEyeCylinder || '0.00')
@@ -701,7 +673,6 @@ export default function CreateOrderPage() {
         setNewRxVPLeftAdd(d.vpLeftEyeAddition || '')
       }
 
-      // PD
       if (d.pupillaryDistance) setNewRxPD(d.pupillaryDistance)
 
       toast.success('Ordonnance scannée avec succès !', {
@@ -712,6 +683,73 @@ export default function CreateOrderPage() {
     } finally {
       setIsScanning(false)
     }
+  }
+
+  const handleScanOrdonnance = async () => {
+    scanInputRef.current?.click()
+  }
+
+  const handleScanFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const base64: string = await new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = () => reject(new Error('Failed to read file'))
+      reader.readAsDataURL(file)
+    })
+    await processAiScan(base64)
+  }
+
+  // ── Live Camera Scanner ─────────────────────────────────────────────────
+  const openCameraModal = async () => {
+    setShowCameraModal(true)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+      })
+      cameraStreamRef.current = stream
+      // Wait for the video element to mount
+      setTimeout(() => {
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream
+          cameraVideoRef.current.play()
+        }
+      }, 100)
+    } catch (err: any) {
+      toast.error('Impossible d\'accéder à la caméra: ' + (err.message || 'Permission refusée'))
+      setShowCameraModal(false)
+    }
+  }
+
+  const closeCameraModal = () => {
+    if (cameraStreamRef.current) {
+      cameraStreamRef.current.getTracks().forEach(t => t.stop())
+      cameraStreamRef.current = null
+    }
+    setShowCameraModal(false)
+  }
+
+  const captureAndScan = async () => {
+    const video = cameraVideoRef.current
+    const canvas = cameraCanvasRef.current
+    if (!video || !canvas) return
+
+    // Capture frame at video resolution
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+
+    // Convert to high-quality JPEG base64
+    const base64 = canvas.toDataURL('image/jpeg', 0.92)
+
+    // Close camera before processing
+    closeCameraModal()
+
+    await processAiScan(base64)
   }
 
   const removeService = (index: number) => setServices(prev => prev.filter((_, i) => i !== index))
@@ -902,19 +940,30 @@ export default function CreateOrderPage() {
                   <span className="w-6 h-6 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs flex items-center justify-center font-bold">2</span>
                   {t('orders.prescriptionInformation')}
                 </h3>
-                <button
-                  type="button"
-                  onClick={handleScanOrdonnance}
-                  disabled={isScanning}
-                  className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-violet-300 dark:border-violet-700 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-900/30 dark:to-purple-900/30 text-violet-700 dark:text-violet-300 hover:from-violet-100 hover:to-purple-100 dark:hover:from-violet-900/50 dark:hover:to-purple-900/50 transition-all duration-200 disabled:opacity-60 disabled:cursor-wait shadow-sm"
-                >
-                  {isScanning ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <ScanLine className="h-3.5 w-3.5" />
-                  )}
-                  {isScanning ? 'Analyse...' : 'Scanner Ordonnance (AI)'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={openCameraModal}
+                    disabled={isScanning}
+                    className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-emerald-300 dark:border-emerald-700 bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/30 dark:to-teal-900/30 text-emerald-700 dark:text-emerald-300 hover:from-emerald-100 hover:to-teal-100 dark:hover:from-emerald-900/50 dark:hover:to-teal-900/50 transition-all duration-200 disabled:opacity-60 disabled:cursor-wait shadow-sm"
+                  >
+                    <Camera className="h-3.5 w-3.5" />
+                    Scanner Live
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleScanOrdonnance}
+                    disabled={isScanning}
+                    className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-violet-300 dark:border-violet-700 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-900/30 dark:to-purple-900/30 text-violet-700 dark:text-violet-300 hover:from-violet-100 hover:to-purple-100 dark:hover:from-violet-900/50 dark:hover:to-purple-900/50 transition-all duration-200 disabled:opacity-60 disabled:cursor-wait shadow-sm"
+                  >
+                    {isScanning ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <ScanLine className="h-3.5 w-3.5" />
+                    )}
+                    {isScanning ? 'Analyse...' : 'Importer Image'}
+                  </button>
+                </div>
                 <input
                   ref={scanInputRef}
                   type="file"
@@ -1600,6 +1649,63 @@ export default function CreateOrderPage() {
       {createdOrder && (
         <div className="print-slip-content hidden print:block">
           <OrderSlip order={createdOrder} />
+        </div>
+      )}
+
+      {/* ── Live Camera Scanner Modal ─────────────────────────────────────── */}
+      {showCameraModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20">
+              <div className="flex items-center gap-2">
+                <Video className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                <span className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">Scanner Live — Ordonnance</span>
+              </div>
+              <button onClick={closeCameraModal} className="p-1.5 hover:bg-white/60 dark:hover:bg-gray-800 rounded-lg transition-colors">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Video Preview */}
+            <div className="relative bg-black flex items-center justify-center" style={{ minHeight: '360px' }}>
+              <video
+                ref={cameraVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="w-full max-h-[60vh] object-contain"
+              />
+              {/* Scanning overlay guide */}
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                <div className="border-2 border-dashed border-emerald-400/60 rounded-lg" style={{ width: '80%', height: '70%' }}>
+                  <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-black/50 text-white text-xs px-3 py-1 rounded-full">
+                    Placez l'ordonnance dans le cadre
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center justify-center gap-3 px-5 py-4 bg-gray-50 dark:bg-gray-800/50">
+              <button
+                onClick={closeCameraModal}
+                className="px-4 py-2.5 text-sm font-medium rounded-lg border border-border hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={captureAndScan}
+                disabled={isScanning}
+                className="flex items-center gap-2 px-6 py-2.5 text-sm font-semibold rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg shadow-emerald-500/25 transition-all duration-200 disabled:opacity-60"
+              >
+                {isScanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
+                Capturer & Analyser
+              </button>
+            </div>
+          </div>
+          {/* Hidden canvas for capture */}
+          <canvas ref={cameraCanvasRef} className="hidden" />
         </div>
       )}
     </div>
