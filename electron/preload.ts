@@ -73,4 +73,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Dashboard
   getDashboardStats: (params: any) => ipcRenderer.invoke('dashboard:stats', params),
+
+  // AI
+  scanOrdonnance: (imageBase64: string) => ipcRenderer.invoke('ai:scanOrdonnance', imageBase64),
 })

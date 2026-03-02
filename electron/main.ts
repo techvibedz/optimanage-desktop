@@ -85,6 +85,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   registerIpcHandlers()
+  registerAiHandlers()
   createWindow()
 
   // ── Auto Update (only in production) ─────────────────────────────────────
@@ -889,6 +890,118 @@ function registerIpcHandlers() {
         },
       }
     } catch (err: any) { return { error: err.message } }
+  })
+}
+
+// ── AI: Scan Ordonnance (Gemini Vision) ──────────────────────────────────
+function registerAiHandlers() {
+  const GEMINI_API_KEY = 'AIzaSyCm8uRzrxTgPiNDz9RC7oMkJrQNfw-TUDY'
+
+  ipcMain.handle('ai:scanOrdonnance', async (_e, imageBase64: string) => {
+    try {
+      if (!GEMINI_API_KEY) return { error: 'AI API key not configured. Set AI_API_KEY in environment.' }
+
+      // Strip data URI prefix if present
+      const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, '').replace(/^data:application\/pdf;base64,/, '')
+
+      const systemPrompt = `You are an expert Algerian ophthalmology assistant specializing in reading optical prescriptions (ordonnances).
+
+Your task: Analyze the provided prescription image and extract ALL optical correction values.
+
+IMPORTANT RULES:
+- Algerian prescriptions use French terminology: OD = Oeil Droit (Right Eye), OG/OS = Oeil Gauche (Left Eye)
+- VL = Vision de Loin (Distance Vision), VP = Vision de Près (Near Vision)
+- SPH = Sphère, CYL = Cylindre, AXE = Axe, ADD = Addition
+- EP/PD = Écart Pupillaire (Pupillary Distance)
+- Return numeric strings with sign (e.g. "+1.50", "-0.75", "0.00")
+- Axis values are integers in degrees (e.g. "90", "180", "0")
+- Addition values are always positive (e.g. "+1.50", "+2.00")
+- If a value is not present or unreadable, return null
+- If there is no VP section, set all VP fields to null
+- If there is no VL section, set all VL fields to null
+- The "Addition" field for VL is typically null unless explicitly stated
+- Pupillary distance (EP) is usually a single number in mm (e.g. "63", "65")
+
+You MUST respond with ONLY a valid JSON object, no markdown, no explanation, no extra text. Just the raw JSON:
+{
+  "vlRightEyeSphere": string | null,
+  "vlRightEyeCylinder": string | null,
+  "vlRightEyeAxis": string | null,
+  "vlRightEyeAddition": string | null,
+  "vlLeftEyeSphere": string | null,
+  "vlLeftEyeCylinder": string | null,
+  "vlLeftEyeAxis": string | null,
+  "vlLeftEyeAddition": string | null,
+  "vpRightEyeSphere": string | null,
+  "vpRightEyeCylinder": string | null,
+  "vpRightEyeAxis": string | null,
+  "vpRightEyeAddition": string | null,
+  "vpLeftEyeSphere": string | null,
+  "vpLeftEyeCylinder": string | null,
+  "vpLeftEyeAxis": string | null,
+  "vpLeftEyeAddition": string | null,
+  "pupillaryDistance": string | null
+}`
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`
+
+      const payload = {
+        contents: [{
+          parts: [
+            { text: systemPrompt },
+            { inlineData: { mimeType: 'image/jpeg', data: base64Data } }
+          ]
+        }],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 1024,
+        }
+      }
+
+      // Use Node.js native https
+      const https = await import('node:https')
+      const responseText: string = await new Promise((resolve, reject) => {
+        const body = JSON.stringify(payload)
+        const urlObj = new URL(url)
+        const req = https.request({
+          hostname: urlObj.hostname,
+          path: urlObj.pathname + urlObj.search,
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+          timeout: 60000,
+        }, (res) => {
+          let data = ''
+          res.on('data', (chunk: string) => { data += chunk })
+          res.on('end', () => {
+            if (res.statusCode && res.statusCode >= 400) {
+              reject(new Error(`Gemini API error ${res.statusCode}: ${data.slice(0, 300)}`))
+            } else {
+              resolve(data)
+            }
+          })
+        })
+        req.on('timeout', () => { req.destroy(); reject(new Error('Gemini API request timed out (60s)')) })
+        req.on('error', (e: Error) => reject(e))
+        req.write(body)
+        req.end()
+      })
+
+      const geminiResponse = JSON.parse(responseText)
+      const textContent = geminiResponse?.candidates?.[0]?.content?.parts?.[0]?.text
+      if (!textContent) return { error: 'AI returned an empty response. Try a clearer image.' }
+
+      // Extract JSON from potential markdown wrapping
+      let jsonStr = textContent.trim()
+      const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/)
+      if (jsonMatch) jsonStr = jsonMatch[1].trim()
+
+      // Parse and validate
+      const parsed = JSON.parse(jsonStr)
+      return { data: parsed }
+    } catch (err: any) {
+      console.error('AI scan error:', err)
+      return { error: err.message || 'Failed to scan prescription image' }
+    }
   })
 }
 

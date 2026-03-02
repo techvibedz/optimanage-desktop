@@ -1,3 +1,23 @@
+export interface ParsedPrescriptionData {
+  vlRightEyeSphere: string | null
+  vlRightEyeCylinder: string | null
+  vlRightEyeAxis: string | null
+  vlRightEyeAddition: string | null
+  vlLeftEyeSphere: string | null
+  vlLeftEyeCylinder: string | null
+  vlLeftEyeAxis: string | null
+  vlLeftEyeAddition: string | null
+  vpRightEyeSphere: string | null
+  vpRightEyeCylinder: string | null
+  vpRightEyeAxis: string | null
+  vpRightEyeAddition: string | null
+  vpLeftEyeSphere: string | null
+  vpLeftEyeCylinder: string | null
+  vpLeftEyeAxis: string | null
+  vpLeftEyeAddition: string | null
+  pupillaryDistance: string | null
+}
+
 export interface ElectronAPI {
   // Auth
   login: (email: string, password: string) => Promise<{ data?: any; error?: string }>
@@ -69,6 +89,9 @@ export interface ElectronAPI {
 
   // Dashboard
   getDashboardStats: (params: any) => Promise<{ data?: any; error?: string }>
+
+  // AI
+  scanOrdonnance: (imageBase64: string) => Promise<{ data?: ParsedPrescriptionData; error?: string }>
 }
 
 declare global {

@@ -5,7 +5,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { toast } from 'sonner'
 import {
   Plus, Trash2, X, Printer, Search,
-  ChevronDown, Check, FileText
+  ChevronDown, Check, FileText, ScanLine, Loader2
 } from 'lucide-react'
 import OrderSlip from '@/components/print/OrderSlip'
 
@@ -434,6 +434,8 @@ export default function CreateOrderPage() {
   const [showPrintDialog, setShowPrintDialog] = useState(false)
   const [createdOrder, setCreatedOrder] = useState<any>(null)
   const printRef = useRef<HTMLDivElement>(null)
+  const [isScanning, setIsScanning] = useState(false)
+  const scanInputRef = useRef<HTMLInputElement>(null)
 
   // Order number
   const [orderNumber, setOrderNumber] = useState('')
@@ -628,6 +630,90 @@ export default function CreateOrderPage() {
     finally { setNewRxCreating(false) }
   }
 
+  const handleScanOrdonnance = async () => {
+    // Trigger hidden file input
+    scanInputRef.current?.click()
+  }
+
+  const handleScanFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    // Reset the input so the same file can be re-selected
+    e.target.value = ''
+
+    setIsScanning(true)
+    try {
+      // Read file as base64
+      const base64: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const result = reader.result as string
+          resolve(result)
+        }
+        reader.onerror = () => reject(new Error('Failed to read file'))
+        reader.readAsDataURL(file)
+      })
+
+      toast.info('Analyse de l\'ordonnance en cours...', { duration: 3000 })
+      const res = await window.electronAPI.scanOrdonnance(base64)
+
+      if (res.error) {
+        toast.error(`Erreur AI: ${res.error}`)
+        return
+      }
+
+      if (!res.data) {
+        toast.error('Aucune donnée extraite de l\'image')
+        return
+      }
+
+      const d = res.data
+
+      // Open the prescription form and fill values
+      setShowNewRxForm(true)
+
+      // Determine which sections have data
+      const hasVL = !!(d.vlRightEyeSphere || d.vlLeftEyeSphere || d.vlRightEyeCylinder || d.vlLeftEyeCylinder)
+      const hasVP = !!(d.vpRightEyeSphere || d.vpLeftEyeSphere || d.vpRightEyeCylinder || d.vpLeftEyeCylinder || d.vpRightEyeAddition || d.vpLeftEyeAddition)
+
+      setNewRxHasVL(hasVL)
+      setNewRxHasVP(hasVP)
+
+      // VL values
+      if (hasVL) {
+        setNewRxVLRightSph(d.vlRightEyeSphere || '0.00')
+        setNewRxVLRightCyl(d.vlRightEyeCylinder || '0.00')
+        setNewRxVLRightAxis(d.vlRightEyeAxis || '')
+        setNewRxVLLeftSph(d.vlLeftEyeSphere || '0.00')
+        setNewRxVLLeftCyl(d.vlLeftEyeCylinder || '0.00')
+        setNewRxVLLeftAxis(d.vlLeftEyeAxis || '')
+      }
+
+      // VP values
+      if (hasVP) {
+        setNewRxVPRightSph(d.vpRightEyeSphere || '0.00')
+        setNewRxVPRightCyl(d.vpRightEyeCylinder || '0.00')
+        setNewRxVPRightAxis(d.vpRightEyeAxis || '')
+        setNewRxVPRightAdd(d.vpRightEyeAddition || '')
+        setNewRxVPLeftSph(d.vpLeftEyeSphere || '0.00')
+        setNewRxVPLeftCyl(d.vpLeftEyeCylinder || '0.00')
+        setNewRxVPLeftAxis(d.vpLeftEyeAxis || '')
+        setNewRxVPLeftAdd(d.vpLeftEyeAddition || '')
+      }
+
+      // PD
+      if (d.pupillaryDistance) setNewRxPD(d.pupillaryDistance)
+
+      toast.success('Ordonnance scannée avec succès !', {
+        description: `${hasVL ? 'VL' : ''}${hasVL && hasVP ? ' + ' : ''}${hasVP ? 'VP' : ''} détectés. Vérifiez les valeurs avant de sauvegarder.`,
+      })
+    } catch (err: any) {
+      toast.error(err.message || 'Erreur lors du scan')
+    } finally {
+      setIsScanning(false)
+    }
+  }
+
   const removeService = (index: number) => setServices(prev => prev.filter((_, i) => i !== index))
   const addFrame = (frame: SelectedFrame) => setSelectedFrames(prev => [...prev, frame])
   const removeFrame = (index: number) => setSelectedFrames(prev => prev.filter((_, i) => i !== index))
@@ -811,10 +897,32 @@ export default function CreateOrderPage() {
           {/* 2. Prescription Section — only when customer selected */}
           {customerId && (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-border p-5">
-              <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs flex items-center justify-center font-bold">2</span>
-                {t('orders.prescriptionInformation')}
-              </h3>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-base font-semibold flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 text-xs flex items-center justify-center font-bold">2</span>
+                  {t('orders.prescriptionInformation')}
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleScanOrdonnance}
+                  disabled={isScanning}
+                  className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-violet-300 dark:border-violet-700 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-900/30 dark:to-purple-900/30 text-violet-700 dark:text-violet-300 hover:from-violet-100 hover:to-purple-100 dark:hover:from-violet-900/50 dark:hover:to-purple-900/50 transition-all duration-200 disabled:opacity-60 disabled:cursor-wait shadow-sm"
+                >
+                  {isScanning ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ScanLine className="h-3.5 w-3.5" />
+                  )}
+                  {isScanning ? 'Analyse...' : 'Scanner Ordonnance (AI)'}
+                </button>
+                <input
+                  ref={scanInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  className="hidden"
+                  onChange={handleScanFileSelected}
+                />
+              </div>
 
               {prescriptions.length > 0 && (
                 <PrescriptionSelect prescriptions={prescriptions} value={prescriptionId} onChange={setPrescriptionId} t={t} />
