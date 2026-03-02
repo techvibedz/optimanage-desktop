@@ -49,7 +49,7 @@ export default function PrintOrderSlipPage() {
   }
 
   return (
-    <div className="min-h-screen overflow-auto">
+    <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <style>{`
         @media print {
           body * { visibility: hidden; }
@@ -61,7 +61,7 @@ export default function PrintOrderSlipPage() {
       `}</style>
 
       {/* Top bar */}
-      <div className="no-print sticky top-0 z-10 bg-white dark:bg-gray-900 border-b border-border px-6 py-3 flex items-center justify-between">
+      <div className="no-print flex-shrink-0 bg-white dark:bg-gray-900 border-b border-border px-6 py-3 flex items-center justify-between z-10">
         <div className="flex items-center gap-3">
           <button onClick={() => navigate(-1)} className="p-2 border border-border rounded-lg hover:bg-muted transition-colors">
             <ArrowLeft className="h-4 w-4" />
@@ -76,10 +76,12 @@ export default function PrintOrderSlipPage() {
         </button>
       </div>
 
-      {/* Preview */}
-      <div className="no-print bg-gray-100 dark:bg-gray-950 min-h-[calc(100vh-56px)] flex items-start justify-center py-8 px-4">
-        <div className="print-slip-content bg-white rounded-sm shadow-lg" style={{ width: '148mm', minHeight: '210mm' }}>
-          <OrderSlip order={order} />
+      {/* Preview — scrollable area */}
+      <div className="no-print flex-1 overflow-auto bg-gray-100 dark:bg-gray-950">
+        <div className="flex justify-center py-8 px-4">
+          <div className="print-slip-content bg-white rounded-sm shadow-lg" style={{ width: '148mm', minHeight: '210mm' }}>
+            <OrderSlip order={order} />
+          </div>
         </div>
       </div>
 

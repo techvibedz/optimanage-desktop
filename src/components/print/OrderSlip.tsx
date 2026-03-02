@@ -279,7 +279,7 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
   // ═══════ BON CLIENT ═══════
   const Client = () => (
-    <div style={{ ...F, padding: '3mm 3.5mm', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ ...F, padding: compact ? '2mm 3mm' : '3mm 3.5mm', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <Header label="BON CLIENT" />
       <div style={{ borderBottom: '2px solid #000', marginBottom: gap }} />
       <InfoRow />
@@ -287,20 +287,20 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
       {/* Ready date — prominent for client */}
       {order.expectedCompletionDate && (
-        <div style={{ textAlign: 'center', border: '2px solid #000', padding: '1.5mm 3mm', marginBottom: gap, fontSize: '8.5pt', fontWeight: 800 }}>
+        <div style={{ textAlign: 'center', border: '2px solid #000', padding: compact ? '1mm 2mm' : '1.5mm 3mm', marginBottom: gap, fontSize: compact ? '7.5pt' : '8.5pt', fontWeight: 800 }}>
           Date de retrait: {fmtReady(order.expectedCompletionDate)}
         </div>
       )}
 
       <div style={{ flex: 1 }} />
-      <Footer large={true} />
+      <Footer large={!compact} />
     </div>
   )
 
   // ═══════ Layout ═══════
   return (
-    <div style={{ width: '148mm', height: '210mm', margin: '0 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ flex: hasBoth ? '1.15 1 0%' : '1 1 0%', overflow: 'hidden' }}>
+    <div style={{ width: '148mm', height: '210mm', margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: hasBoth ? '1.3 1 0%' : '1 1 0%', minHeight: 0, overflow: 'hidden' }}>
         <Atelier />
       </div>
 
@@ -310,7 +310,7 @@ export default function OrderSlip({ order }: OrderSlipProps) {
         <div style={{ flex: 1, borderTop: '1.5px dashed #000' }} />
       </div>
 
-      <div style={{ flex: hasBoth ? '0.85 1 0%' : '1 1 0%', overflow: 'hidden' }}>
+      <div style={{ flex: hasBoth ? '0.7 1 0%' : '1 1 0%', minHeight: 0, overflow: 'hidden' }}>
         <Client />
       </div>
     </div>
