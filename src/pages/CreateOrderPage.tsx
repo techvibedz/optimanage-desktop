@@ -794,8 +794,7 @@ export default function CreateOrderPage() {
         return
       }
 
-      // Phase 2: Document detected! Capture full-res and send to AI
-      // Re-capture at full resolution for AI
+      // Phase 2: Document detected! Capture full-res, close camera immediately, then analyze
       const video = cameraVideoRef.current
       const canvas = cameraCanvasRef.current
       if (!video || !canvas) { runDetectionLoop(); return }
@@ -806,10 +805,14 @@ export default function CreateOrderPage() {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       const base64 = canvas.toDataURL('image/jpeg', 0.92)
 
-      setAutoScanStatus('analyzing')
+      // Close camera right away — user can put the prescription down
+      stopAutoScan()
+      closeCameraModal()
+      setIsScanning(true)
+      toast.info('Image capturée — analyse en cours...', { duration: 5000 })
+
       try {
         const res = await window.electronAPI.scanOrdonnance(base64)
-        if (!autoScanActiveRef.current) return
 
         if (res.data && !res.error) {
           const d = res.data
@@ -817,49 +820,41 @@ export default function CreateOrderPage() {
           const hasVP = !!(d.vpRightEyeSphere || d.vpLeftEyeSphere || d.vpRightEyeCylinder || d.vpLeftEyeCylinder || d.vpRightEyeAddition || d.vpLeftEyeAddition)
 
           if (hasVL || hasVP) {
-            setAutoScanStatus('found')
-            stopAutoScan()
-            await new Promise(r => setTimeout(r, 600))
-            closeCameraModal()
-            setIsScanning(true)
-            try {
-              setShowNewRxForm(true)
-              setNewRxHasVL(hasVL)
-              setNewRxHasVP(hasVP)
-              if (hasVL) {
-                setNewRxVLRightSph(d.vlRightEyeSphere || '0.00')
-                setNewRxVLRightCyl(d.vlRightEyeCylinder || '0.00')
-                setNewRxVLRightAxis(d.vlRightEyeAxis || '')
-                setNewRxVLLeftSph(d.vlLeftEyeSphere || '0.00')
-                setNewRxVLLeftCyl(d.vlLeftEyeCylinder || '0.00')
-                setNewRxVLLeftAxis(d.vlLeftEyeAxis || '')
-              }
-              if (hasVP) {
-                setNewRxVPRightSph(d.vpRightEyeSphere || '0.00')
-                setNewRxVPRightCyl(d.vpRightEyeCylinder || '0.00')
-                setNewRxVPRightAxis(d.vpRightEyeAxis || '')
-                setNewRxVPRightAdd(d.vpRightEyeAddition || '')
-                setNewRxVPLeftSph(d.vpLeftEyeSphere || '0.00')
-                setNewRxVPLeftCyl(d.vpLeftEyeCylinder || '0.00')
-                setNewRxVPLeftAxis(d.vpLeftEyeAxis || '')
-                setNewRxVPLeftAdd(d.vpLeftEyeAddition || '')
-              }
-              if (d.pupillaryDistance) setNewRxPD(d.pupillaryDistance)
-              toast.success('Ordonnance détectée automatiquement !', {
-                description: `${hasVL ? 'VL' : ''}${hasVL && hasVP ? ' + ' : ''}${hasVP ? 'VP' : ''} détectés. Vérifiez les valeurs.`,
-              })
-            } finally { setIsScanning(false) }
+            setShowNewRxForm(true)
+            setNewRxHasVL(hasVL)
+            setNewRxHasVP(hasVP)
+            if (hasVL) {
+              setNewRxVLRightSph(d.vlRightEyeSphere || '0.00')
+              setNewRxVLRightCyl(d.vlRightEyeCylinder || '0.00')
+              setNewRxVLRightAxis(d.vlRightEyeAxis || '')
+              setNewRxVLLeftSph(d.vlLeftEyeSphere || '0.00')
+              setNewRxVLLeftCyl(d.vlLeftEyeCylinder || '0.00')
+              setNewRxVLLeftAxis(d.vlLeftEyeAxis || '')
+            }
+            if (hasVP) {
+              setNewRxVPRightSph(d.vpRightEyeSphere || '0.00')
+              setNewRxVPRightCyl(d.vpRightEyeCylinder || '0.00')
+              setNewRxVPRightAxis(d.vpRightEyeAxis || '')
+              setNewRxVPRightAdd(d.vpRightEyeAddition || '')
+              setNewRxVPLeftSph(d.vpLeftEyeSphere || '0.00')
+              setNewRxVPLeftCyl(d.vpLeftEyeCylinder || '0.00')
+              setNewRxVPLeftAxis(d.vpLeftEyeAxis || '')
+              setNewRxVPLeftAdd(d.vpLeftEyeAddition || '')
+            }
+            if (d.pupillaryDistance) setNewRxPD(d.pupillaryDistance)
+            toast.success('Ordonnance détectée automatiquement !', {
+              description: `${hasVL ? 'VL' : ''}${hasVL && hasVP ? ' + ' : ''}${hasVP ? 'VP' : ''} détectés. Vérifiez les valeurs.`,
+            })
+            setIsScanning(false)
             return
           }
         }
-        // AI didn't find prescription data — resume detection
-        setAutoScanStatus('scanning')
-        runDetectionLoop()
+        // AI didn't find prescription — let user know
+        toast.warning('Document détecté mais pas d\'ordonnance. Réessayez.')
+        setIsScanning(false)
       } catch {
-        if (autoScanActiveRef.current) {
-          setAutoScanStatus('scanning')
-          runDetectionLoop()
-        }
+        toast.error('Erreur lors de l\'analyse. Réessayez.')
+        setIsScanning(false)
       }
     }, 500)
   }
