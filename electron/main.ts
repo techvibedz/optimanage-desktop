@@ -895,7 +895,7 @@ function registerIpcHandlers() {
 
 // ── AI: Scan Ordonnance (Gemini Vision) ──────────────────────────────────
 function registerAiHandlers() {
-  const GEMINI_API_KEY = 'AIzaSyCm8uRzrxTgPiNDz9RC7oMkJrQNfw-TUDY'
+  const GEMINI_API_KEY = 'AIzaSyCeEnDyNSUhClIEOn-We92pbzqs5ZwetmE'
 
   ipcMain.handle('ai:scanOrdonnance', async (_e, imageBase64: string) => {
     try {
