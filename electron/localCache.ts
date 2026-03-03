@@ -448,15 +448,39 @@ export function getLocalPayments(userId: string, params: any = {}): { payments: 
   let where = `WHERE (userId=? OR orderId IN (SELECT id FROM orders WHERE userId=?))`
   const args: any[] = [userId, userId]
 
+  if (params.orderId) {
+    where += ' AND orderId=?'
+    args.push(params.orderId)
+  }
+  if (params.paymentMethod && params.paymentMethod !== 'all') {
+    where += ' AND paymentMethod=?'
+    args.push(params.paymentMethod)
+  }
+  if (params.startDate) {
+    where += ' AND paymentDate >= ?'
+    args.push(new Date(params.startDate).toISOString())
+  }
+  if (params.endDate) {
+    const end = new Date(params.endDate)
+    end.setDate(end.getDate() + 1)
+    where += ' AND paymentDate < ?'
+    args.push(end.toISOString())
+  }
+  if (params.search) {
+    const s = `%${params.search}%`
+    where += ' AND (receiptNumber LIKE ? OR reference LIKE ? OR description LIKE ?)'
+    args.push(s, s, s)
+  }
+
   const page = params.page || 1
   const limit = params.limit || 10
   const offset = (page - 1) * limit
 
   const total = (d.prepare(`SELECT COUNT(*) as c FROM payments ${where}`).get(...args) as any).c
-  const payments = d.prepare(`SELECT * FROM payments ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`)
+  const payments = d.prepare(`SELECT * FROM payments ${where} ORDER BY paymentDate DESC, createdAt DESC LIMIT ? OFFSET ?`)
     .all(...args, limit, offset)
 
-  // Attach order info
+  // Attach order info + customer
   for (const p of payments) {
     if ((p as any).orderId) {
       (p as any).order = d.prepare('SELECT id, orderNumber, customerId FROM orders WHERE id=?').get((p as any).orderId)
@@ -485,7 +509,17 @@ export function getLocalExpenses(userId: string, params: any = {}): { expenses: 
   const d = getDb()
   let where = 'WHERE userId=?'
   const args: any[] = [userId]
-  if (params.category) { where += ' AND category=?'; args.push(params.category) }
+  if (params.category && params.category !== 'all') { where += ' AND category=?'; args.push(params.category) }
+  if (params.date) {
+    // Filter expenses for a specific day
+    const start = new Date(params.date)
+    start.setHours(0, 0, 0, 0)
+    const end = new Date(params.date)
+    end.setHours(0, 0, 0, 0)
+    end.setDate(end.getDate() + 1)
+    where += ' AND date >= ? AND date < ?'
+    args.push(start.toISOString(), end.toISOString())
+  }
 
   const page = params.page || 1
   const limit = params.limit || 10

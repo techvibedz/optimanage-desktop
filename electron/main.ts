@@ -459,10 +459,17 @@ function registerIpcHandlers() {
 
   ipcMain.handle('customers:delete', async (_e, id: string) => {
     try {
+      if (id.startsWith('local_')) {
+        deleteLocalCustomer(id)
+        return { success: true }
+      }
       await prisma.customer.delete({ where: { id } })
       deleteLocalCustomer(id)
       return { success: true }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isDbError(err)) { deleteLocalCustomer(id); return { success: true } }
+      return { error: err.message }
+    }
   })
 
   // ── Orders ────────────────────────────────────────────────────────────────
@@ -621,10 +628,21 @@ function registerIpcHandlers() {
 
   ipcMain.handle('orders:delete', async (_e, id: string) => {
     try {
+      // Local-only orders (created offline) can't exist in Prisma
+      if (id.startsWith('local_')) {
+        deleteLocalOrder(id)
+        return { success: true }
+      }
       await prisma.order.delete({ where: { id } })
       deleteLocalOrder(id)
       return { success: true }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isDbError(err)) {
+        deleteLocalOrder(id)
+        return { success: true }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('orders:latestNumber', async (_e, userId: string) => {
@@ -643,7 +661,21 @@ function registerIpcHandlers() {
         }
       }
       return { data: maxNum > 0 ? `ORD-${String(maxNum).padStart(3, '0')}` : null }
-    } catch { return { data: null } }
+    } catch {
+      // Fallback to local cache for order number
+      const { getDb } = require('./localCache')
+      const d = getDb()
+      const localOrders = d.prepare('SELECT orderNumber FROM orders WHERE userId=?').all(userId) as any[]
+      let maxNum = 0
+      for (const o of localOrders) {
+        const match = o.orderNumber?.match(/ORD-(\d+)/)
+        if (match) {
+          const num = parseInt(match[1], 10)
+          if (num > maxNum) maxNum = num
+        }
+      }
+      return { data: maxNum > 0 ? `ORD-${String(maxNum).padStart(3, '0')}` : null }
+    }
   })
 
   // ── Prescriptions ─────────────────────────────────────────────────────────
@@ -703,10 +735,17 @@ function registerIpcHandlers() {
 
   ipcMain.handle('prescriptions:delete', async (_e, id: string) => {
     try {
+      if (id.startsWith('local_')) {
+        deleteLocalPrescription(id)
+        return { success: true }
+      }
       await prisma.prescription.delete({ where: { id } })
       deleteLocalPrescription(id)
       return { success: true }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isDbError(err)) { deleteLocalPrescription(id); return { success: true } }
+      return { error: err.message }
+    }
   })
 
   // ── Frames ────────────────────────────────────────────────────────────────
@@ -912,10 +951,17 @@ function registerIpcHandlers() {
 
   ipcMain.handle('payments:delete', async (_e, id: string) => {
     try {
+      if (id.startsWith('local_')) {
+        deleteLocalPayment(id)
+        return { success: true }
+      }
       await prisma.payment.delete({ where: { id } })
       deleteLocalPayment(id)
       return { success: true }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isDbError(err)) { deleteLocalPayment(id); return { success: true } }
+      return { error: err.message }
+    }
   })
 
   // ── Expenses ──────────────────────────────────────────────────────────────
@@ -970,10 +1016,17 @@ function registerIpcHandlers() {
 
   ipcMain.handle('expenses:delete', async (_e, id: string) => {
     try {
+      if (id.startsWith('local_')) {
+        deleteLocalExpense(id)
+        return { success: true }
+      }
       await prisma.expense.delete({ where: { id } })
       deleteLocalExpense(id)
       return { success: true }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isDbError(err)) { deleteLocalExpense(id); return { success: true } }
+      return { error: err.message }
+    }
   })
 
   // ── Settings ──────────────────────────────────────────────────────────────
