@@ -4,9 +4,9 @@ import fs from 'node:fs'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 export interface QueueItem {
-  id: string
-  action: string
-  payload: any
+  id: string          // the local_xxx ID given to the record in SQLite
+  action: string      // e.g. 'customers:create', 'orders:create', 'payments:create'
+  payload: any        // the original data sent by the frontend
   createdAt: string
   retries: number
 }
@@ -40,31 +40,25 @@ export function isOnline(): boolean {
   try {
     return net.isOnline()
   } catch {
-    return true // assume online if check fails (e.g. during startup)
+    return true
   }
 }
 
-export function addToQueue(action: string, payload: any): string {
+export function addToQueue(action: string, payload: any, localId: string): void {
   const queue = readQueue()
-  const id = `temp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   queue.push({
-    id,
+    id: localId,
     action,
     payload,
     createdAt: new Date().toISOString(),
     retries: 0,
   })
   writeQueue(queue)
-  console.log(`[SyncManager] Queued ${action} (${id}). Queue size: ${queue.length}`)
-  return id
+  console.log(`[SyncManager] Queued ${action} (${localId}). Queue size: ${queue.length}`)
 }
 
 export function getQueueLength(): number {
   return readQueue().length
-}
-
-export function getQueue(): QueueItem[] {
-  return readQueue()
 }
 
 /**

@@ -5,6 +5,12 @@ import path from 'node:path'
 import fs from 'node:fs'
 import Module from 'node:module'
 import { addToQueue, getQueueLength, processQueue, isOnline } from './syncManager'
+import {
+  hydrateCache, cacheCustomer, cacheOrder, cachePayment, cachePrescription, cacheFrame, cacheLensType, cacheSetting, cacheExpense,
+  getLocalCustomers, getLocalCustomer, getLocalOrders, getLocalOrder, getLocalPrescriptions, getLocalPayments,
+  getLocalFrames, getLocalLensTypes, getLocalSettings, getLocalExpenses, getLocalDashboardStats,
+  createLocalCustomer, createLocalOrder, createLocalPayment, createLocalPrescription,
+} from './localCache'
 
 // ─── Prisma: redirect requires to extraResources in production ───────────────
 if (app.isPackaged) {
@@ -135,6 +141,9 @@ function getSyncHandlers() {
           })
         }
       }
+    },
+    'prescriptions:create': async (payload: any) => {
+      await prisma.prescription.create({ data: payload })
     },
   } as Record<string, (payload: any) => Promise<any>>
 }
@@ -331,6 +340,8 @@ function registerIpcHandlers() {
 
       currentUser = { id: user.id, email: user.email, name: user.name, role: user.role }
       saveSession(currentUser)
+      // Hydrate local cache in background for offline support
+      hydrateCache(prisma, user.id).catch((e: any) => console.warn('[Login] Cache hydration error:', e.message))
       return { data: { user: currentUser } }
     } catch (err: any) {
       return { error: err.message || 'Login failed' }
@@ -345,6 +356,8 @@ function registerIpcHandlers() {
 
   ipcMain.handle('auth:session', async () => {
     if (!currentUser) return { data: null }
+    // Refresh local cache in background on session restore
+    if (isOnline()) hydrateCache(prisma, currentUser.id).catch(() => {})
     return { data: { user: currentUser } }
   })
 
@@ -367,26 +380,36 @@ function registerIpcHandlers() {
         orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
         take: params.limit || 50,
       })
+      for (const c of data) cacheCustomer(c)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) return { data: getLocalCustomers(params.userId, params.query, params.limit) }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('customers:get', async (_e, id: string) => {
     try {
       const data = await prisma.customer.findUnique({ where: { id } })
+      if (data) cacheCustomer(data)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) return { data: getLocalCustomer(id) }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('customers:create', async (_e, customer: any) => {
     try {
       const data = await prisma.customer.create({ data: customer })
+      cacheCustomer(data)
       return { data }
     } catch (err: any) {
       if (!isOnline()) {
-        const tempId = addToQueue('customers:create', customer)
+        const data = createLocalCustomer(customer)
+        addToQueue('customers:create', customer, data.id)
         broadcastSyncStatus()
-        return { data: { ...customer, id: tempId, _queued: true } }
+        return { data }
       }
       return { error: err.message }
     }
@@ -460,8 +483,15 @@ function registerIpcHandlers() {
         }),
       ])
 
+      for (const o of orders) cacheOrder(o)
       return { data: { orders, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) {
+        const local = getLocalOrders(params.userId, params)
+        return { data: { orders: local.orders, pagination: { total: local.total, pages: Math.ceil(local.total / (params.limit || 10)), page: params.page || 1, limit: params.limit || 10 } } }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('orders:get', async (_e, id: string) => {
@@ -470,8 +500,12 @@ function registerIpcHandlers() {
         where: { id },
         include: { customer: true, prescription: true, frame: true, lensType: true, payments: true, vlRightEyeLensType: true, vlLeftEyeLensType: true, vpRightEyeLensType: true, vpLeftEyeLensType: true },
       })
+      if (data) cacheOrder(data)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) return { data: getLocalOrder(id) }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('orders:create', async (_e, orderData: any) => {
@@ -528,12 +562,14 @@ function registerIpcHandlers() {
         })
       }
 
+      cacheOrder(data)
       return { data }
     } catch (err: any) {
       if (!isOnline()) {
-        const tempId = addToQueue('orders:create', orderData)
+        const data = createLocalOrder(orderData, orderData.userId)
+        addToQueue('orders:create', orderData, data.id)
         broadcastSyncStatus()
-        return { data: { ...orderData, id: tempId, orderNumber: `ORD-OFFLINE-${Date.now().toString().slice(-6)}`, _queued: true } }
+        return { data }
       }
       return { error: err.message }
     }
@@ -592,15 +628,31 @@ function registerIpcHandlers() {
         }),
       ])
 
+      for (const rx of prescriptions) cachePrescription(rx)
       return { data: { prescriptions, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline() && params.customerId) {
+        const rxs = getLocalPrescriptions(params.customerId)
+        return { data: { prescriptions: rxs, pagination: { total: rxs.length, pages: 1, page: 1, limit: rxs.length } } }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('prescriptions:create', async (_e, prescription: any) => {
     try {
       const data = await prisma.prescription.create({ data: prescription })
+      cachePrescription(data)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) {
+        const data = createLocalPrescription(prescription)
+        addToQueue('prescriptions:create', prescription, data.id)
+        broadcastSyncStatus()
+        return { data }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('prescriptions:update', async (_e, id: string, updates: any) => {
@@ -630,8 +682,12 @@ function registerIpcHandlers() {
         ]
       }
       const data = await prisma.frame.findMany({ where, orderBy: [{ stock: 'desc' }, { brand: 'asc' }] })
+      for (const f of data) cacheFrame(f)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) return { data: getLocalFrames(params.userId) }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('frames:create', async (_e, frame: any) => {
@@ -661,8 +717,12 @@ function registerIpcHandlers() {
         ]
       }
       const data = await prisma.lensType.findMany({ where, orderBy: { name: 'asc' } })
+      for (const lt of data) cacheLensType(lt)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) return { data: getLocalLensTypes(params.userId) }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('lensTypes:create', async (_e, lensType: any) => {
@@ -747,8 +807,15 @@ function registerIpcHandlers() {
         }),
       ])
 
+      for (const p of payments) cachePayment(p)
       return { data: { payments, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) {
+        const local = getLocalPayments(params.userId, params)
+        return { data: { payments: local.payments, pagination: { total: local.total, pages: Math.ceil(local.total / (params.limit || 15)), page: params.page || 1, limit: params.limit || 15 } } }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('payments:create', async (_e, payment: any) => {
@@ -772,12 +839,14 @@ function registerIpcHandlers() {
         }
       }
 
+      cachePayment(data)
       return { data }
     } catch (err: any) {
       if (!isOnline()) {
-        const tempId = addToQueue('payments:create', payment)
+        const data = createLocalPayment(payment)
+        addToQueue('payments:create', payment, data.id)
         broadcastSyncStatus()
-        return { data: { ...payment, id: tempId, _queued: true } }
+        return { data }
       }
       return { error: err.message }
     }
@@ -849,13 +918,21 @@ function registerIpcHandlers() {
           },
         })
       }
+      cacheSetting(data)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) {
+        const local = getLocalSettings(userId)
+        if (local) return { data: local }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('settings:update', async (_e, userId: string, updates: any) => {
     try {
       const data = await prisma.setting.update({ where: { userId }, data: updates })
+      cacheSetting(data)
       return { data }
     } catch (err: any) { return { error: err.message } }
   })
@@ -1035,7 +1112,10 @@ function registerIpcHandlers() {
           currency: 'DA',
         },
       }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) return { data: getLocalDashboardStats(params.userId, params.filter) }
+      return { error: err.message }
+    }
   })
 
   // ── Dashboard: Recent Activity ───────────────────────────────────────────
@@ -1088,7 +1168,30 @@ function registerIpcHandlers() {
       activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
       return { data: activities.slice(0, limit) }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) {
+        // Build activity feed from local cache
+        const { getDb } = require('./localCache')
+        const d = getDb()
+        const localOrders = d.prepare('SELECT * FROM orders WHERE userId=? ORDER BY createdAt DESC LIMIT ?').all(params.userId, params.limit || 10)
+        const localCustomers = d.prepare('SELECT * FROM customers WHERE userId=? ORDER BY createdAt DESC LIMIT ?').all(params.userId, params.limit || 10)
+        const localPayments = d.prepare('SELECT * FROM payments WHERE userId=? OR orderId IN (SELECT id FROM orders WHERE userId=?) ORDER BY createdAt DESC LIMIT ?').all(params.userId, params.userId, params.limit || 10)
+        const acts: any[] = []
+        for (const o of localOrders as any[]) {
+          const cust = d.prepare('SELECT firstName, lastName FROM customers WHERE id=?').get(o.customerId) as any
+          acts.push({ type: 'order', date: o.createdAt, data: { orderNumber: o.orderNumber, status: o.status, customer: `${cust?.firstName || ''} ${cust?.lastName || ''}`.trim(), amount: o.totalPrice } })
+        }
+        for (const c of localCustomers as any[]) acts.push({ type: 'customer', date: c.createdAt, data: { name: `${c.firstName || ''} ${c.lastName || ''}`.trim(), phone: c.phone } })
+        for (const p of localPayments as any[]) {
+          const ord = p.orderId ? d.prepare('SELECT orderNumber, customerId FROM orders WHERE id=?').get(p.orderId) as any : null
+          const cust = ord?.customerId ? d.prepare('SELECT firstName, lastName FROM customers WHERE id=?').get(ord.customerId) as any : null
+          acts.push({ type: 'payment', date: p.createdAt, data: { amount: p.amount, method: p.paymentMethod, orderNumber: ord?.orderNumber, customer: `${cust?.firstName || ''} ${cust?.lastName || ''}`.trim() } })
+        }
+        acts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        return { data: acts.slice(0, params.limit || 10) }
+      }
+      return { error: err.message }
+    }
   })
 }
 

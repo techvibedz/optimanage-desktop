@@ -22,6 +22,7 @@ export default defineConfig({
                 '@prisma/client',
                 '.prisma/client',
                 '.prisma/client/default',
+                'better-sqlite3',
               ],
             },
           },
