@@ -76,4 +76,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // AI
   scanOrdonnance: (imageBase64: string) => ipcRenderer.invoke('ai:scanOrdonnance', imageBase64),
+
+  // Updater
+  checkUpdate: () => ipcRenderer.invoke('updater:check'),
+  downloadUpdate: () => ipcRenderer.invoke('updater:download'),
+  installUpdate: () => ipcRenderer.invoke('updater:install'),
+  onUpdaterStatus: (callback: (_status: { type: string; data?: any }) => void) => {
+    const handler = (_event: any, status: { type: string; data?: any }) => callback(status)
+    ipcRenderer.on('updater:status', handler)
+    return () => { ipcRenderer.removeListener('updater:status', handler) }
+  },
 })

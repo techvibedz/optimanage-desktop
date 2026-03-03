@@ -88,12 +88,11 @@ app.whenReady().then(() => {
   registerAiHandlers()
   createWindow()
 
-  // ── Auto Update (only in production) ─────────────────────────────────────
+  // ── Auto Update (React UI — no native dialogs) ──────────────────────────
   if (app.isPackaged) {
-    autoUpdater.autoDownload = true
+    autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = true
 
-    // Private repo: always set the GitHub token for authentication
     const ghToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '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'
     autoUpdater.setFeedURL({
       provider: 'github',
@@ -103,42 +102,78 @@ app.whenReady().then(() => {
       token: ghToken,
     })
 
+    const sendStatus = (type: string, data?: any) => {
+      mainWindow?.webContents.send('updater:status', { type, data })
+    }
+
     autoUpdater.on('checking-for-update', () => {
-      console.log('Auto-update: checking for updates...')
+      console.log('Auto-update: checking...')
+      sendStatus('checking-for-update')
     })
 
     autoUpdater.on('update-available', (info: any) => {
       console.log('Auto-update: update available', info.version)
-      mainWindow?.webContents.send('update-status', { status: 'downloading', version: info.version })
+      sendStatus('update-available', {
+        version: info.version,
+        releaseDate: info.releaseDate,
+        releaseNotes: info.releaseNotes,
+      })
     })
 
     autoUpdater.on('update-not-available', (info: any) => {
-      console.log('Auto-update: no update available. Current:', app.getVersion(), 'Latest:', info.version)
+      console.log('Auto-update: up to date. Current:', app.getVersion(), 'Latest:', info.version)
+      sendStatus('update-not-available', { version: info.version })
+    })
+
+    autoUpdater.on('download-progress', (progress: any) => {
+      sendStatus('download-progress', {
+        percent: progress.percent,
+        bytesPerSecond: progress.bytesPerSecond,
+        transferred: progress.transferred,
+        total: progress.total,
+      })
     })
 
     autoUpdater.on('update-downloaded', (info: any) => {
       console.log('Auto-update: downloaded', info.version)
-      dialog.showMessageBox(mainWindow!, {
-        type: 'info',
-        title: 'Update Ready',
-        message: `Version ${info.version} has been downloaded. Restart to apply the update.`,
-        buttons: ['Restart Now', 'Later'],
-      }).then(({ response }) => {
-        if (response === 0) autoUpdater.quitAndInstall()
-      })
+      sendStatus('update-downloaded', { version: info.version })
     })
 
     autoUpdater.on('error', (err: any) => {
       console.error('Auto-update error:', err.message)
+      sendStatus('error', { message: err.message })
     })
 
-    // Check for updates after 3 seconds (avoid blocking startup)
+    // IPC handlers for renderer control
+    ipcMain.handle('updater:check', async () => {
+      try {
+        await autoUpdater.checkForUpdates()
+        return { success: true }
+      } catch (err: any) {
+        return { error: err.message }
+      }
+    })
+
+    ipcMain.handle('updater:download', async () => {
+      try {
+        await autoUpdater.downloadUpdate()
+        return { success: true }
+      } catch (err: any) {
+        return { error: err.message }
+      }
+    })
+
+    ipcMain.handle('updater:install', () => {
+      autoUpdater.quitAndInstall()
+    })
+
+    // Check for updates after 5 seconds (avoid blocking startup)
     setTimeout(() => {
       console.log('Auto-update: initiating check. App version:', app.getVersion())
-      autoUpdater.checkForUpdatesAndNotify().catch((err: any) => {
+      autoUpdater.checkForUpdates().catch((err: any) => {
         console.error('Auto-update check failed:', err.message)
       })
-    }, 3000)
+    }, 5000)
   }
 
   app.on('activate', () => {

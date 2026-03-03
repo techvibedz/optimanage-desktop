@@ -92,6 +92,26 @@ export interface ElectronAPI {
 
   // AI
   scanOrdonnance: (imageBase64: string) => Promise<{ data?: ParsedPrescriptionData; error?: string }>
+
+  // Updater
+  checkUpdate: () => Promise<{ success?: boolean; error?: string }>
+  downloadUpdate: () => Promise<{ success?: boolean; error?: string }>
+  installUpdate: () => Promise<void>
+  onUpdaterStatus: (callback: (status: UpdaterStatus) => void) => () => void
+}
+
+export interface UpdaterStatus {
+  type: 'checking-for-update' | 'update-available' | 'update-not-available' | 'download-progress' | 'update-downloaded' | 'error'
+  data?: {
+    version?: string
+    releaseDate?: string
+    releaseNotes?: string
+    percent?: number
+    bytesPerSecond?: number
+    transferred?: number
+    total?: number
+    message?: string
+  }
 }
 
 declare global {

@@ -1,14 +1,36 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useSettings } from '@/lib/settings-context'
 import { useTranslation } from '@/lib/use-translation'
 import { setLanguage, Language } from '@/lib/translations'
 import { toast } from 'sonner'
-import { Upload, X } from 'lucide-react'
+import { Upload, X, Loader2, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react'
+import type { UpdaterStatus } from '@/types/electron'
 
 export default function SettingsPage() {
   const { t } = useTranslation()
   const { settings, updateSettings } = useSettings()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'up-to-date' | 'available' | 'error'>('idle')
+  const [updateVersion, setUpdateVersion] = useState('')
+
+  useEffect(() => {
+    if (!window.electronAPI?.onUpdaterStatus) return
+    const cleanup = window.electronAPI.onUpdaterStatus((status: UpdaterStatus) => {
+      switch (status.type) {
+        case 'checking-for-update': setUpdateStatus('checking'); break
+        case 'update-available': setUpdateStatus('available'); setUpdateVersion(status.data?.version || ''); break
+        case 'update-not-available': setUpdateStatus('up-to-date'); break
+        case 'error': setUpdateStatus('error'); break
+      }
+    })
+    return cleanup
+  }, [])
+
+  const handleCheckUpdate = async () => {
+    setUpdateStatus('checking')
+    await window.electronAPI.checkUpdate()
+  }
+
   const [form, setForm] = useState({
     opticianName: settings.opticianName,
     opticianAddress: settings.opticianAddress,
@@ -139,6 +161,51 @@ export default function SettingsPage() {
             </button>
           </div>
         </form>
+      </div>
+
+      {/* Application Updates */}
+      <div className="bg-white dark:bg-gray-800/50 rounded-xl border border-border/50 p-6 max-w-2xl mt-6">
+        <h2 className="text-lg font-semibold mb-4">Mises à jour de l'application</h2>
+        <div className="flex items-center justify-between">
+          <div className="flex-1">
+            <p className="text-sm text-muted-foreground">
+              Vérifiez si une nouvelle version d'OptiManage est disponible.
+            </p>
+            <div className="mt-2 flex items-center gap-2 text-xs">
+              {updateStatus === 'checking' && (
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" /> Vérification en cours...
+                </span>
+              )}
+              {updateStatus === 'up-to-date' && (
+                <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                  <CheckCircle2 className="h-3.5 w-3.5" /> Vous êtes à jour
+                </span>
+              )}
+              {updateStatus === 'available' && (
+                <span className="flex items-center gap-1.5 text-violet-600 dark:text-violet-400">
+                  <RefreshCw className="h-3.5 w-3.5" /> Version {updateVersion} disponible !
+                </span>
+              )}
+              {updateStatus === 'error' && (
+                <span className="flex items-center gap-1.5 text-red-500">
+                  <AlertCircle className="h-3.5 w-3.5" /> Erreur de vérification
+                </span>
+              )}
+            </div>
+          </div>
+          <button
+            onClick={handleCheckUpdate}
+            disabled={updateStatus === 'checking'}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-60 disabled:cursor-wait"
+          >
+            {updateStatus === 'checking'
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <RefreshCw className="h-4 w-4" />
+            }
+            Vérifier les mises à jour
+          </button>
+        </div>
       </div>
     </div>
   )
