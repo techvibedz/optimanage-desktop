@@ -158,6 +158,11 @@ export const translations: Record<Language, Translations> = {
     // Common (continued)
     'common.viewAll': 'View All',
 
+    // Sync
+    'sync.online': 'Online',
+    'sync.offline': 'Offline Mode',
+    'sync.syncing': 'Syncing',
+
     // Customers
     'customers.title': 'Customers',
     'customers.subtitle': 'Manage your customer database',
@@ -603,6 +608,11 @@ export const translations: Record<Language, Translations> = {
     'dashboard.noActivity': 'Aucune activit\u00e9',
 
     'common.viewAll': 'Voir tout',
+
+    // Sync
+    'sync.online': 'En ligne',
+    'sync.offline': 'Mode Hors Ligne',
+    'sync.syncing': 'Synchronisation',
 
     // Customers
     'customers.title': 'Clients',

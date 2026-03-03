@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, dialog, net } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import bcrypt from 'bcryptjs'
 import path from 'node:path'
 import fs from 'node:fs'
 import Module from 'node:module'
+import { addToQueue, getQueueLength, processQueue, isOnline } from './syncManager'
 
 // ─── Prisma: redirect requires to extraResources in production ───────────────
 if (app.isPackaged) {
@@ -83,10 +84,96 @@ function createWindow() {
   }
 }
 
+// ─── Sync: handler map for replaying queued operations ─────────────────────
+function getSyncHandlers() {
+  return {
+    'customers:create': async (payload: any) => {
+      await prisma.customer.create({ data: payload })
+    },
+    'orders:create': async (payload: any) => {
+      const { depositAmount, frameId, ...rest } = payload
+      const createData: any = { ...rest, depositAmount }
+      delete createData.customer
+      delete createData.prescription
+      delete createData.frame
+      delete createData.lensType
+      const order = await prisma.order.create({ data: createData })
+      if (depositAmount && depositAmount > 0) {
+        await prisma.payment.create({
+          data: {
+            orderId: order.id,
+            amount: depositAmount,
+            paymentMethod: 'cash',
+            receiptNumber: `REC-${Date.now().toString().slice(-6)}`,
+            reference: 'Initial deposit (synced)',
+            paymentDate: new Date(),
+            userId: payload.userId,
+          },
+        })
+      }
+      if (frameId) {
+        await prisma.frame.updateMany({
+          where: { id: frameId, stock: { gt: 0 } },
+          data: { stock: { decrement: 1 } },
+        })
+      }
+    },
+    'payments:create': async (payload: any) => {
+      if (!payload.receiptNumber) {
+        payload.receiptNumber = `RCT-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 10000)}`
+      }
+      await prisma.payment.create({ data: payload })
+      if (payload.orderId) {
+        const order = await prisma.order.findUnique({ where: { id: payload.orderId }, select: { balanceDue: true, depositAmount: true } })
+        if (order) {
+          await prisma.order.update({
+            where: { id: payload.orderId },
+            data: {
+              balanceDue: Math.max(0, (order.balanceDue || 0) - payload.amount),
+              depositAmount: (order.depositAmount || 0) + payload.amount,
+            },
+          })
+        }
+      }
+    },
+  } as Record<string, (payload: any) => Promise<any>>
+}
+
+// ─── Sync: broadcast status to renderer ────────────────────────────────────
+function broadcastSyncStatus() {
+  mainWindow?.webContents.send('sync:status', {
+    isOnline: isOnline(),
+    pendingItems: getQueueLength(),
+  })
+}
+
+let syncInterval: ReturnType<typeof setInterval> | null = null
+
 app.whenReady().then(() => {
   registerIpcHandlers()
   registerAiHandlers()
   createWindow()
+
+  // ── Sync: IPC handlers & periodic loop ──────────────────────────────────
+  ipcMain.handle('sync:forceSync', async () => {
+    const processed = await processQueue(getSyncHandlers())
+    broadcastSyncStatus()
+    return { processed, remaining: getQueueLength() }
+  })
+
+  ipcMain.handle('sync:getStatus', () => ({
+    isOnline: isOnline(),
+    pendingItems: getQueueLength(),
+  }))
+
+  // Broadcast status every 10s + auto-process queue when online
+  syncInterval = setInterval(async () => {
+    broadcastSyncStatus()
+    if (isOnline() && getQueueLength() > 0) {
+      await processQueue(getSyncHandlers())
+      broadcastSyncStatus()
+    }
+  }, 10_000)
 
   // ── Auto Update (React UI — no native dialogs) ──────────────────────────
   if (app.isPackaged) {
@@ -295,7 +382,14 @@ function registerIpcHandlers() {
     try {
       const data = await prisma.customer.create({ data: customer })
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) {
+        const tempId = addToQueue('customers:create', customer)
+        broadcastSyncStatus()
+        return { data: { ...customer, id: tempId, _queued: true } }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('customers:update', async (_e, id: string, updates: any) => {
@@ -435,7 +529,14 @@ function registerIpcHandlers() {
       }
 
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) {
+        const tempId = addToQueue('orders:create', orderData)
+        broadcastSyncStatus()
+        return { data: { ...orderData, id: tempId, orderNumber: `ORD-OFFLINE-${Date.now().toString().slice(-6)}`, _queued: true } }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('orders:update', async (_e, id: string, updates: any) => {
@@ -672,7 +773,14 @@ function registerIpcHandlers() {
       }
 
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) {
+        const tempId = addToQueue('payments:create', payment)
+        broadcastSyncStatus()
+        return { data: { ...payment, id: tempId, _queued: true } }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('payments:delete', async (_e, id: string) => {

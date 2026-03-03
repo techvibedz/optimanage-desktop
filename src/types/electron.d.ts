@@ -94,11 +94,21 @@ export interface ElectronAPI {
   // AI
   scanOrdonnance: (imageBase64: string) => Promise<{ data?: ParsedPrescriptionData; error?: string }>
 
+  // Sync (offline queue)
+  forceSync: () => Promise<{ processed: number; remaining: number }>
+  getSyncStatus: () => Promise<{ isOnline: boolean; pendingItems: number }>
+  onSyncStatus: (callback: (status: SyncStatus) => void) => () => void
+
   // Updater
   checkUpdate: () => Promise<{ success?: boolean; error?: string }>
   downloadUpdate: () => Promise<{ success?: boolean; error?: string }>
   installUpdate: () => Promise<void>
   onUpdaterStatus: (callback: (status: UpdaterStatus) => void) => () => void
+}
+
+export interface SyncStatus {
+  isOnline: boolean
+  pendingItems: number
 }
 
 export interface UpdaterStatus {
