@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   DollarSign, ShoppingCart, Users, RefreshCw, Package, Zap, Eye, EyeOff,
-  TrendingUp, TrendingDown, Minus, ArrowRight, FileText, CreditCard, BarChart3, CalendarDays
+  TrendingUp, TrendingDown, Minus, ArrowRight, FileText, CreditCard, BarChart3, CalendarDays,
+  Clock, UserPlus, Receipt
 } from 'lucide-react'
 import { useTranslation } from '@/lib/use-translation'
 import { useAuth } from '@/lib/auth-context'
@@ -43,8 +44,22 @@ export default function DashboardPage() {
     const saved = localStorage.getItem('dashboard_show_prices')
     return saved !== null ? saved === 'true' : true
   })
+  const [recentOrders, setRecentOrders] = useState<any[]>([])
+  const [activities, setActivities] = useState<any[]>([])
 
-  useEffect(() => { fetchStats(activeFilter) }, [])
+  useEffect(() => { fetchStats(activeFilter); fetchRecentData() }, [])
+
+  const fetchRecentData = async () => {
+    if (!user?.id) return
+    try {
+      const [ordersRes, activityRes] = await Promise.all([
+        window.electronAPI.getOrders({ userId: user.id, page: 1, limit: 5 }),
+        window.electronAPI.getRecentActivity({ userId: user.id, limit: 8 }),
+      ])
+      if (ordersRes.data) setRecentOrders(ordersRes.data.orders || ordersRes.data)
+      if (activityRes.data) setActivities(activityRes.data)
+    } catch (err) { console.error('Error fetching recent data:', err) }
+  }
 
   const fetchStats = async (filter: string, startDate?: string, endDate?: string) => {
     if (!user?.id) return
@@ -236,6 +251,112 @@ export default function DashboardPage() {
               </div>
             </Link>
           ))}
+        </div>
+      </div>
+      {/* Bottom Grid: Recent Orders + Activity Feed */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Recent Orders */}
+        <div className="bg-white dark:bg-gray-800/50 rounded-2xl border border-border/50 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold flex items-center gap-2">
+              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+              {t('dashboard.recentOrders') || 'Commandes récentes'}
+            </h2>
+            <Link to="/orders" className="text-xs text-primary hover:underline flex items-center gap-1">
+              {t('common.viewAll') || 'Voir tout'} <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
+          {recentOrders.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">{t('dashboard.noOrders') || 'Aucune commande'}</p>
+          ) : (
+            <div className="space-y-2">
+              {recentOrders.map((order: any, i: number) => {
+                const statusColors: Record<string, string> = {
+                  pending: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
+                  in_progress: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+                  completed: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+                  delivered: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
+                  cancelled: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+                }
+                const statusLabel = order.status?.replace('_', ' ') || 'pending'
+                return (
+                  <Link key={order.id || i} to={`/orders`}
+                    className="flex items-center justify-between p-3 rounded-xl hover:bg-muted/50 transition-colors no-underline group">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center flex-shrink-0">
+                        <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">
+                          {order.orderNumber || `#${String(i + 1).padStart(3, '0')}`}
+                          <span className="text-muted-foreground font-normal ml-2">
+                            {`${order.customer?.firstName || ''} ${order.customer?.lastName || ''}`.trim() || '—'}
+                          </span>
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {order.createdAt ? new Date(order.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3 flex-shrink-0">
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize ${statusColors[order.status] || statusColors.pending}`}>
+                        {statusLabel}
+                      </span>
+                      <span className="text-sm font-semibold">{fmtAmount(order.totalPrice || 0)}</span>
+                    </div>
+                  </Link>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Recent Activity Feed */}
+        <div className="bg-white dark:bg-gray-800/50 rounded-2xl border border-border/50 p-5">
+          <h2 className="text-base font-semibold flex items-center gap-2 mb-4">
+            <Clock className="h-4 w-4 text-muted-foreground" />
+            {t('dashboard.recentActivity') || 'Activité récente'}
+          </h2>
+          {activities.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">{t('dashboard.noActivity') || 'Aucune activité'}</p>
+          ) : (
+            <div className="relative">
+              <div className="absolute left-[15px] top-2 bottom-2 w-px bg-border" />
+              <div className="space-y-1">
+                {activities.map((act: any, i: number) => {
+                  const iconMap: Record<string, { icon: any; bg: string; text: string }> = {
+                    order: { icon: ShoppingCart, bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-400' },
+                    customer: { icon: UserPlus, bg: 'bg-violet-100 dark:bg-violet-900/30', text: 'text-violet-600 dark:text-violet-400' },
+                    payment: { icon: CreditCard, bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-600 dark:text-emerald-400' },
+                  }
+                  const { icon: Icon, bg, text } = iconMap[act.type] || iconMap.order
+
+                  let label = ''
+                  if (act.type === 'order') {
+                    label = `Commande ${act.data.orderNumber || ''} — ${act.data.customer || ''}${act.data.amount ? ` · ${fmtAmount(act.data.amount)}` : ''}`
+                  } else if (act.type === 'customer') {
+                    label = `Nouveau client : ${act.data.name || ''}${act.data.phone ? ` (${act.data.phone})` : ''}`
+                  } else if (act.type === 'payment') {
+                    label = `Paiement ${fmtAmount(act.data.amount || 0)}${act.data.method ? ` (${act.data.method})` : ''}${act.data.customer ? ` — ${act.data.customer}` : ''}`
+                  }
+
+                  return (
+                    <div key={i} className="flex items-start gap-3 py-2 relative">
+                      <div className={`w-[30px] h-[30px] rounded-full ${bg} flex items-center justify-center flex-shrink-0 z-10`}>
+                        <Icon className={`h-3.5 w-3.5 ${text}`} />
+                      </div>
+                      <div className="min-w-0 flex-1 pt-0.5">
+                        <p className="text-sm truncate">{label}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {act.date ? new Date(act.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

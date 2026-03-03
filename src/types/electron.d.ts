@@ -89,6 +89,7 @@ export interface ElectronAPI {
 
   // Dashboard
   getDashboardStats: (params: any) => Promise<{ data?: any; error?: string }>
+  getRecentActivity: (params: any) => Promise<{ data?: any[]; error?: string }>
 
   // AI
   scanOrdonnance: (imageBase64: string) => Promise<{ data?: ParsedPrescriptionData; error?: string }>

@@ -929,6 +929,59 @@ function registerIpcHandlers() {
       }
     } catch (err: any) { return { error: err.message } }
   })
+
+  // ── Dashboard: Recent Activity ───────────────────────────────────────────
+  ipcMain.handle('dashboard:recentActivity', async (_e, params: any) => {
+    try {
+      const { userId, limit = 10 } = params
+      const [recentOrders, recentCustomers, recentPayments] = await Promise.all([
+        prisma.order.findMany({
+          where: { userId },
+          include: { customer: { select: { firstName: true, lastName: true } } },
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+        }),
+        prisma.customer.findMany({
+          where: { userId },
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+        }),
+        prisma.payment.findMany({
+          where: { OR: [{ userId }, { order: { userId } }] },
+          include: { order: { select: { orderNumber: true, customer: { select: { firstName: true, lastName: true } } } } },
+          orderBy: { createdAt: 'desc' },
+          take: limit,
+        }),
+      ])
+
+      // Merge into a single activity feed sorted by date
+      const activities: any[] = []
+      recentOrders.forEach((o: any) => activities.push({
+        type: 'order', date: o.createdAt, data: {
+          orderNumber: o.orderNumber, status: o.status,
+          customer: `${o.customer?.firstName || ''} ${o.customer?.lastName || ''}`.trim(),
+          amount: o.totalPrice,
+        },
+      }))
+      recentCustomers.forEach((c: any) => activities.push({
+        type: 'customer', date: c.createdAt, data: {
+          name: `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+          phone: c.phone,
+        },
+      }))
+      recentPayments.forEach((p: any) => activities.push({
+        type: 'payment', date: p.createdAt, data: {
+          amount: p.amount, method: p.paymentMethod,
+          orderNumber: p.order?.orderNumber,
+          customer: `${p.order?.customer?.firstName || ''} ${p.order?.customer?.lastName || ''}`.trim(),
+        },
+      }))
+
+      activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+
+      return { data: activities.slice(0, limit) }
+    } catch (err: any) { return { error: err.message } }
+  })
 }
 
 // ── AI: Scan Ordonnance (OpenRouter + Gemini fallback) ───────────────────
