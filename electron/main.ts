@@ -110,29 +110,74 @@ function createWindow() {
 function getSyncHandlers() {
   return {
     'customers:create': async (payload: any) => {
-      const data = { ...payload }
-      delete data.id // Remove local_ ID, let Prisma generate a proper UUID
+      console.log('[SyncHandler] customers:create — syncing', payload.id || 'unknown')
+      const data: any = {
+        firstName: payload.firstName,
+        lastName: payload.lastName,
+        userId: payload.userId,
+      }
+      // Optional fields
+      if (payload.email) data.email = payload.email
+      if (payload.phone) data.phone = payload.phone
+      if (payload.dateOfBirth) data.dateOfBirth = new Date(payload.dateOfBirth)
+      if (payload.address) data.address = payload.address
+      if (payload.insuranceProvider) data.insuranceProvider = payload.insuranceProvider
+      if (payload.insurancePolicyNumber) data.insurancePolicyNumber = payload.insurancePolicyNumber
+      if (payload.insuranceCoverageDetails) data.insuranceCoverageDetails = payload.insuranceCoverageDetails
+      if (payload.notes) data.notes = payload.notes
+      if (payload.createdAt) data.createdAt = new Date(payload.createdAt)
       await prisma.customer.create({ data })
+      console.log('[SyncHandler] customers:create — done')
     },
     'orders:create': async (payload: any) => {
-      const { depositAmount, frameId, ...rest } = payload
-      const createData: any = { ...rest, depositAmount }
-      delete createData.customer
-      delete createData.prescription
-      delete createData.frame
-      delete createData.lensType
-      delete createData.vlRightEyeLensType
-      delete createData.vlLeftEyeLensType
-      delete createData.vpRightEyeLensType
-      delete createData.vpLeftEyeLensType
-      delete createData.payments
-      // Remove local-only fields
-      delete createData.id
+      console.log('[SyncHandler] orders:create — starting sync for', payload.id || 'unknown')
+      // Build a clean data object with ONLY the fields Prisma Order model accepts
+      const createData: any = {
+        orderNumber: '', // will be computed below
+        customerId: payload.customerId,
+        userId: payload.userId,
+        status: payload.status || 'in_progress',
+        totalPrice: payload.totalPrice || 0,
+        basePrice: payload.basePrice || 0,
+        addonsPrice: payload.addonsPrice || 0,
+        depositAmount: payload.depositAmount || 0,
+        balanceDue: payload.balanceDue || 0,
+        expectedCompletionDate: payload.expectedCompletionDate ? new Date(payload.expectedCompletionDate) : new Date(),
+        customerNotes: payload.customerNotes || null,
+        technicalNotes: payload.technicalNotes || null,
+      }
+      // Optional relation IDs
+      if (payload.prescriptionId) createData.prescriptionId = payload.prescriptionId
+      if (payload.frameId) createData.frameId = payload.frameId
+      if (payload.lensTypeId) createData.lensTypeId = payload.lensTypeId
+      if (payload.vlRightEyeLensTypeId) createData.vlRightEyeLensTypeId = payload.vlRightEyeLensTypeId
+      if (payload.vlLeftEyeLensTypeId) createData.vlLeftEyeLensTypeId = payload.vlLeftEyeLensTypeId
+      if (payload.vpRightEyeLensTypeId) createData.vpRightEyeLensTypeId = payload.vpRightEyeLensTypeId
+      if (payload.vpLeftEyeLensTypeId) createData.vpLeftEyeLensTypeId = payload.vpLeftEyeLensTypeId
+      // Optional price fields
+      if (payload.framePrice != null) createData.framePrice = payload.framePrice
+      if (payload.vlRightEyeLensPrice != null) createData.vlRightEyeLensPrice = payload.vlRightEyeLensPrice
+      if (payload.vlLeftEyeLensPrice != null) createData.vlLeftEyeLensPrice = payload.vlLeftEyeLensPrice
+      if (payload.vpRightEyeLensPrice != null) createData.vpRightEyeLensPrice = payload.vpRightEyeLensPrice
+      if (payload.vpLeftEyeLensPrice != null) createData.vpLeftEyeLensPrice = payload.vpLeftEyeLensPrice
+      // Quantity fields
+      if (payload.vlRightEyeLensQuantity != null) createData.vlRightEyeLensQuantity = payload.vlRightEyeLensQuantity
+      if (payload.vlLeftEyeLensQuantity != null) createData.vlLeftEyeLensQuantity = payload.vlLeftEyeLensQuantity
+      if (payload.vpRightEyeLensQuantity != null) createData.vpRightEyeLensQuantity = payload.vpRightEyeLensQuantity
+      if (payload.vpLeftEyeLensQuantity != null) createData.vpLeftEyeLensQuantity = payload.vpLeftEyeLensQuantity
+      // createdAt — convert string to Date if provided
+      if (payload.createdAt) createData.createdAt = new Date(payload.createdAt)
+
       // Skip if customerId is a local_ ID (customer hasn't synced yet)
       if (createData.customerId && createData.customerId.startsWith('local_')) {
-        console.warn('[SyncHandler] orders:create skipped — customerId is local, customer not synced yet')
+        console.warn('[SyncHandler] orders:create — customerId is local, will retry later')
         throw new Error('Customer not synced yet')
       }
+      // Strip local_ prefix IDs from relation fields (they don't exist in Prisma)
+      for (const key of ['prescriptionId', 'frameId', 'lensTypeId', 'vlRightEyeLensTypeId', 'vlLeftEyeLensTypeId', 'vpRightEyeLensTypeId', 'vpLeftEyeLensTypeId']) {
+        if (createData[key] && createData[key].startsWith('local_')) delete createData[key]
+      }
+
       // Compute a proper server-side order number
       const existingOrders = await prisma.order.findMany({
         where: { userId: payload.userId },
@@ -147,12 +192,16 @@ function getSyncHandlers() {
         }
       }
       createData.orderNumber = `ORD-${String(maxNum + 1).padStart(3, '0')}`
+      console.log('[SyncHandler] orders:create — computed orderNumber:', createData.orderNumber)
+
       const order = await prisma.order.create({ data: createData })
-      if (depositAmount && depositAmount > 0) {
+      console.log('[SyncHandler] orders:create — created order:', order.id, order.orderNumber)
+
+      if (payload.depositAmount && payload.depositAmount > 0) {
         await prisma.payment.create({
           data: {
             orderId: order.id,
-            amount: depositAmount,
+            amount: payload.depositAmount,
             paymentMethod: 'cash',
             receiptNumber: `REC-${Date.now().toString().slice(-6)}`,
             reference: 'Initial deposit (synced)',
@@ -161,9 +210,9 @@ function getSyncHandlers() {
           },
         })
       }
-      if (frameId) {
+      if (payload.frameId && !payload.frameId.startsWith('local_')) {
         await prisma.frame.updateMany({
-          where: { id: frameId, stock: { gt: 0 } },
+          where: { id: payload.frameId, stock: { gt: 0 } },
           data: { stock: { decrement: 1 } },
         })
       }
@@ -191,9 +240,35 @@ function getSyncHandlers() {
       }
     },
     'prescriptions:create': async (payload: any) => {
-      const data = { ...payload }
-      delete data.id // Remove local_ ID
+      console.log('[SyncHandler] prescriptions:create — syncing', payload.id || 'unknown')
+      // Skip if customerId is local
+      if (payload.customerId && payload.customerId.startsWith('local_')) {
+        console.warn('[SyncHandler] prescriptions:create — customerId is local, will retry later')
+        throw new Error('Customer not synced yet')
+      }
+      const data: any = {
+        customerId: payload.customerId,
+        doctorName: payload.doctorName || '',
+        doctorLicense: payload.doctorLicense || '',
+        pupillaryDistance: payload.pupillaryDistance || 0,
+        examinationDate: payload.examinationDate ? new Date(payload.examinationDate) : new Date(),
+        expirationDate: payload.expirationDate ? new Date(payload.expirationDate) : new Date(),
+      }
+      if (payload.readingDistance != null) data.readingDistance = payload.readingDistance
+      if (payload.notes) data.notes = payload.notes
+      if (payload.hasVLData != null) data.hasVLData = payload.hasVLData
+      if (payload.hasVPData != null) data.hasVPData = payload.hasVPData
+      // VL fields
+      for (const f of ['vlLeftEyeAxis','vlLeftEyeCylinder','vlLeftEyePrism','vlLeftEyeSphere','vlRightEyeAxis','vlRightEyeCylinder','vlRightEyePrism','vlRightEyeSphere']) {
+        if (payload[f] != null) data[f] = payload[f]
+      }
+      // VP fields
+      for (const f of ['vpLeftEyeAxis','vpLeftEyeCylinder','vpLeftEyePrism','vpLeftEyeSphere','vpRightEyeAxis','vpRightEyeCylinder','vpRightEyePrism','vpRightEyeSphere','vpLeftEyeAdd','vpRightEyeAdd']) {
+        if (payload[f] != null) data[f] = payload[f]
+      }
+      if (payload.createdAt) data.createdAt = new Date(payload.createdAt)
       await prisma.prescription.create({ data })
+      console.log('[SyncHandler] prescriptions:create — done')
     },
   } as Record<string, (payload: any) => Promise<any>>
 }

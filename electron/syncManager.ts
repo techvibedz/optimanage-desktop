@@ -77,6 +77,10 @@ export async function processQueue(
   const queue = readQueue()
   if (queue.length === 0) return 0
 
+  // Sort queue: customers first, then orders, then prescriptions, then payments
+  const priority: Record<string, number> = { 'customers:create': 0, 'orders:create': 1, 'prescriptions:create': 1, 'payments:create': 2 }
+  queue.sort((a, b) => (priority[a.action] ?? 9) - (priority[b.action] ?? 9))
+
   console.log(`[SyncManager] Processing ${queue.length} queued items...`)
   let processed = 0
   const remaining: QueueItem[] = []
@@ -102,8 +106,8 @@ export async function processQueue(
         break
       }
       item.retries++
-      if (item.retries >= 5) {
-        console.error(`[SyncManager] ✗ Dropped ${item.action} (${item.id}) after 5 retries: ${err.message}`)
+      if (item.retries >= 20) {
+        console.error(`[SyncManager] ✗ Dropped ${item.action} (${item.id}) after 20 retries: ${err.message}`)
       } else {
         console.warn(`[SyncManager] ✗ Failed ${item.action} (${item.id}), retry ${item.retries}: ${err.message}`)
         remaining.push(item)
