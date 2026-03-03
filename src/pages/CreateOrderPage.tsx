@@ -1058,7 +1058,7 @@ export default function CreateOrderPage() {
             {/* Inline Add New Customer */}
             {!showNewCustomerForm ? (
               <button type="button" onClick={() => setShowNewCustomerForm(true)}
-                className="mt-3 flex items-center gap-1.5 text-xs text-primary hover:underline">
+                className="mt-3 inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border border-violet-200 dark:border-violet-800/50 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-all shadow-sm">
                 <Plus className="h-3.5 w-3.5" /> {t('customers.addCustomer') || 'Add New Customer'}
               </button>
             ) : (
@@ -1143,7 +1143,7 @@ export default function CreateOrderPage() {
               {/* Add New Prescription — Quick Prescription (like web app) */}
               {!showNewRxForm ? (
                 <button type="button" onClick={() => setShowNewRxForm(true)}
-                  className="mt-3 flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 hover:underline">
+                  className="mt-3 inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border border-emerald-200 dark:border-emerald-800/50 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-all shadow-sm">
                   <Plus className="h-3.5 w-3.5" /> {t('prescriptions.addPrescription') || 'Add New Prescription'}
                 </button>
               ) : (
