@@ -93,6 +93,14 @@ export async function processQueue(
       processed++
       console.log(`[SyncManager] ✓ Synced ${item.action} (${item.id})`)
     } catch (err: any) {
+      const msg = String(err?.message || '')
+      const isConnectionError = msg.includes("Can't reach database server") || msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('ENOTFOUND') || err?.code === 'P1001' || err?.code === 'P1002'
+      if (isConnectionError) {
+        // DB unreachable — stop processing, keep all remaining items
+        console.warn(`[SyncManager] DB unreachable, aborting sync. Will retry later.`)
+        remaining.push(item, ...queue.slice(queue.indexOf(item) + 1))
+        break
+      }
       item.retries++
       if (item.retries >= 5) {
         console.error(`[SyncManager] ✗ Dropped ${item.action} (${item.id}) after 5 retries: ${err.message}`)

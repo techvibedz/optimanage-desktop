@@ -53,6 +53,21 @@ if (fs.existsSync(envPath)) {
 const { PrismaClient } = require('@prisma/client')
 const prisma = new PrismaClient()
 
+// Helper: detect if an error is a DB connection failure (Prisma can't reach the server)
+// Used to fall back to local cache even when net.isOnline() returns true
+function isDbError(err: any): boolean {
+  if (!isOnline()) return true
+  const msg = String(err?.message || '')
+  if (msg.includes("Can't reach database server")) return true
+  if (msg.includes('Connection refused')) return true
+  if (msg.includes('ECONNREFUSED')) return true
+  if (msg.includes('ETIMEDOUT')) return true
+  if (msg.includes('ENOTFOUND')) return true
+  if (msg.includes('connect EHOSTUNREACH')) return true
+  if (err?.code === 'P1001' || err?.code === 'P1002') return true // Prisma connection error codes
+  return false
+}
+
 // ─── Window ───────────────────────────────────────────────────────────────────
 let mainWindow: BrowserWindow | null = null
 const VITE_DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL
@@ -348,8 +363,8 @@ function registerIpcHandlers() {
       hydrateCache(prisma, user.id).catch((e: any) => console.warn('[Login] Cache hydration error:', e.message))
       return { data: { user: currentUser } }
     } catch (err: any) {
-      // Offline login fallback: check local SQLite cache
-      if (!isOnline()) {
+      // Offline / DB-unreachable login fallback: check local SQLite cache
+      if (isDbError(err)) {
         const localUser = getLocalUser(email)
         if (localUser) {
           const passwordMatch = await bcrypt.compare(password, localUser.password)
@@ -359,7 +374,7 @@ function registerIpcHandlers() {
             return { data: { user: currentUser } }
           }
         }
-        return { error: 'Cannot login offline — no cached credentials. Please login online first.' }
+        return { error: 'Cannot reach server — no cached credentials. Please login online first.' }
       }
       return { error: err.message || 'Login failed' }
     }
@@ -402,7 +417,7 @@ function registerIpcHandlers() {
       for (const c of data) cacheCustomer(c)
       return { data }
     } catch (err: any) {
-      if (!isOnline()) return { data: getLocalCustomers(params.userId, params.query, params.limit) }
+      if (isDbError(err)) return { data: getLocalCustomers(params.userId, params.query, params.limit) }
       return { error: err.message }
     }
   })
@@ -413,7 +428,7 @@ function registerIpcHandlers() {
       if (data) cacheCustomer(data)
       return { data }
     } catch (err: any) {
-      if (!isOnline()) return { data: getLocalCustomer(id) }
+      if (isDbError(err)) return { data: getLocalCustomer(id) }
       return { error: err.message }
     }
   })
@@ -424,7 +439,7 @@ function registerIpcHandlers() {
       cacheCustomer(data)
       return { data }
     } catch (err: any) {
-      if (!isOnline()) {
+      if (isDbError(err)) {
         const data = createLocalCustomer(customer)
         addToQueue('customers:create', customer, data.id)
         broadcastSyncStatus()
@@ -507,7 +522,7 @@ function registerIpcHandlers() {
       for (const o of orders) cacheOrder(o)
       return { data: { orders, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
-      if (!isOnline()) {
+      if (isDbError(err)) {
         const local = getLocalOrders(params.userId, params)
         return { data: { orders: local.orders, pagination: { total: local.total, pages: Math.ceil(local.total / (params.limit || 10)), page: params.page || 1, limit: params.limit || 10 } } }
       }
@@ -524,7 +539,7 @@ function registerIpcHandlers() {
       if (data) cacheOrder(data)
       return { data }
     } catch (err: any) {
-      if (!isOnline()) return { data: getLocalOrder(id) }
+      if (isDbError(err)) return { data: getLocalOrder(id) }
       return { error: err.message }
     }
   })
@@ -586,7 +601,7 @@ function registerIpcHandlers() {
       cacheOrder(data)
       return { data }
     } catch (err: any) {
-      if (!isOnline()) {
+      if (isDbError(err)) {
         const data = createLocalOrder(orderData, orderData.userId)
         addToQueue('orders:create', orderData, data.id)
         broadcastSyncStatus()
@@ -654,7 +669,7 @@ function registerIpcHandlers() {
       for (const rx of prescriptions) cachePrescription(rx)
       return { data: { prescriptions, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
-      if (!isOnline() && params.customerId) {
+      if (isDbError(err) && params.customerId) {
         const rxs = getLocalPrescriptions(params.customerId)
         return { data: { prescriptions: rxs, pagination: { total: rxs.length, pages: 1, page: 1, limit: rxs.length } } }
       }
@@ -668,7 +683,7 @@ function registerIpcHandlers() {
       cachePrescription(data)
       return { data }
     } catch (err: any) {
-      if (!isOnline()) {
+      if (isDbError(err)) {
         const data = createLocalPrescription(prescription)
         addToQueue('prescriptions:create', prescription, data.id)
         broadcastSyncStatus()
@@ -710,7 +725,7 @@ function registerIpcHandlers() {
       for (const f of data) cacheFrame(f)
       return { data }
     } catch (err: any) {
-      if (!isOnline()) return { data: getLocalFrames(params.userId) }
+      if (isDbError(err)) return { data: getLocalFrames(params.userId) }
       return { error: err.message }
     }
   })
@@ -754,7 +769,7 @@ function registerIpcHandlers() {
       for (const lt of data) cacheLensType(lt)
       return { data }
     } catch (err: any) {
-      if (!isOnline()) return { data: getLocalLensTypes(params.userId) }
+      if (isDbError(err)) return { data: getLocalLensTypes(params.userId) }
       return { error: err.message }
     }
   })
@@ -853,7 +868,7 @@ function registerIpcHandlers() {
       for (const p of payments) cachePayment(p)
       return { data: { payments, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
-      if (!isOnline()) {
+      if (isDbError(err)) {
         const local = getLocalPayments(params.userId, params)
         return { data: { payments: local.payments, pagination: { total: local.total, pages: Math.ceil(local.total / (params.limit || 15)), page: params.page || 1, limit: params.limit || 15 } } }
       }
@@ -885,7 +900,7 @@ function registerIpcHandlers() {
       cachePayment(data)
       return { data }
     } catch (err: any) {
-      if (!isOnline()) {
+      if (isDbError(err)) {
         const data = createLocalPayment(payment)
         addToQueue('payments:create', payment, data.id)
         broadcastSyncStatus()
@@ -925,7 +940,7 @@ function registerIpcHandlers() {
       for (const e of expenses) cacheExpense(e)
       return { data: { expenses, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
-      if (!isOnline()) {
+      if (isDbError(err)) {
         const local = getLocalExpenses(params.userId, params)
         return { data: { expenses: local.expenses, pagination: { total: local.total, pages: Math.ceil(local.total / (params.limit || 10)), page: params.page || 1, limit: params.limit || 10 } } }
       }
@@ -981,7 +996,7 @@ function registerIpcHandlers() {
       cacheSetting(data)
       return { data }
     } catch (err: any) {
-      if (!isOnline()) {
+      if (isDbError(err)) {
         const local = getLocalSettings(userId)
         if (local) return { data: local }
       }
@@ -1173,7 +1188,7 @@ function registerIpcHandlers() {
         },
       }
     } catch (err: any) {
-      if (!isOnline()) return { data: getLocalDashboardStats(params.userId, params.filter) }
+      if (isDbError(err)) return { data: getLocalDashboardStats(params.userId, params.filter) }
       return { error: err.message }
     }
   })
@@ -1229,7 +1244,7 @@ function registerIpcHandlers() {
 
       return { data: activities.slice(0, limit) }
     } catch (err: any) {
-      if (!isOnline()) {
+      if (isDbError(err)) {
         // Build activity feed from local cache
         const { getDb } = require('./localCache')
         const d = getDb()
