@@ -110,7 +110,9 @@ function createWindow() {
 function getSyncHandlers() {
   return {
     'customers:create': async (payload: any) => {
-      await prisma.customer.create({ data: payload })
+      const data = { ...payload }
+      delete data.id // Remove local_ ID, let Prisma generate a proper UUID
+      await prisma.customer.create({ data })
     },
     'orders:create': async (payload: any) => {
       const { depositAmount, frameId, ...rest } = payload
@@ -119,6 +121,32 @@ function getSyncHandlers() {
       delete createData.prescription
       delete createData.frame
       delete createData.lensType
+      delete createData.vlRightEyeLensType
+      delete createData.vlLeftEyeLensType
+      delete createData.vpRightEyeLensType
+      delete createData.vpLeftEyeLensType
+      delete createData.payments
+      // Remove local-only fields
+      delete createData.id
+      // Skip if customerId is a local_ ID (customer hasn't synced yet)
+      if (createData.customerId && createData.customerId.startsWith('local_')) {
+        console.warn('[SyncHandler] orders:create skipped — customerId is local, customer not synced yet')
+        throw new Error('Customer not synced yet')
+      }
+      // Compute a proper server-side order number
+      const existingOrders = await prisma.order.findMany({
+        where: { userId: payload.userId },
+        select: { orderNumber: true },
+      })
+      let maxNum = 0
+      for (const o of existingOrders) {
+        const match = o.orderNumber?.match(/ORD-(\d+)/)
+        if (match) {
+          const num = parseInt(match[1], 10)
+          if (num > maxNum) maxNum = num
+        }
+      }
+      createData.orderNumber = `ORD-${String(maxNum + 1).padStart(3, '0')}`
       const order = await prisma.order.create({ data: createData })
       if (depositAmount && depositAmount > 0) {
         await prisma.payment.create({
@@ -141,10 +169,14 @@ function getSyncHandlers() {
       }
     },
     'payments:create': async (payload: any) => {
-      if (!payload.receiptNumber) {
-        payload.receiptNumber = `RCT-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 10000)}`
+      const data = { ...payload }
+      delete data.id // Remove local_ ID
+      if (!data.receiptNumber) {
+        data.receiptNumber = `RCT-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 10000)}`
       }
-      await prisma.payment.create({ data: payload })
+      // If orderId is a local_ ID, skip the payment sync (the order sync will create the deposit)
+      if (data.orderId && data.orderId.startsWith('local_')) return
+      await prisma.payment.create({ data })
       if (payload.orderId) {
         const order = await prisma.order.findUnique({ where: { id: payload.orderId }, select: { balanceDue: true, depositAmount: true } })
         if (order) {
@@ -159,7 +191,9 @@ function getSyncHandlers() {
       }
     },
     'prescriptions:create': async (payload: any) => {
-      await prisma.prescription.create({ data: payload })
+      const data = { ...payload }
+      delete data.id // Remove local_ ID
+      await prisma.prescription.create({ data })
     },
   } as Record<string, (payload: any) => Promise<any>>
 }
@@ -205,13 +239,10 @@ app.whenReady().then(() => {
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = true
 
-    const ghToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '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'
     autoUpdater.setFeedURL({
       provider: 'github',
       owner: 'techvibedz',
       repo: 'optimanage-desktop',
-      private: true,
-      token: ghToken,
     })
 
     const sendStatus = (type: string, data?: any) => {

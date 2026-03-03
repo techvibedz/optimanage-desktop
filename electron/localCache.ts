@@ -435,6 +435,10 @@ export function getLocalOrder(id: string): any {
   order.prescription = order.prescriptionId ? d.prepare('SELECT * FROM prescriptions WHERE id=?').get(order.prescriptionId) : null
   order.frame = order.frameId ? d.prepare('SELECT * FROM frames WHERE id=?').get(order.frameId) : null
   order.lensType = order.lensTypeId ? d.prepare('SELECT * FROM lensTypes WHERE id=?').get(order.lensTypeId) : null
+  order.vlRightEyeLensType = order.vlRightEyeLensTypeId ? d.prepare('SELECT * FROM lensTypes WHERE id=?').get(order.vlRightEyeLensTypeId) : null
+  order.vlLeftEyeLensType = order.vlLeftEyeLensTypeId ? d.prepare('SELECT * FROM lensTypes WHERE id=?').get(order.vlLeftEyeLensTypeId) : null
+  order.vpRightEyeLensType = order.vpRightEyeLensTypeId ? d.prepare('SELECT * FROM lensTypes WHERE id=?').get(order.vpRightEyeLensTypeId) : null
+  order.vpLeftEyeLensType = order.vpLeftEyeLensTypeId ? d.prepare('SELECT * FROM lensTypes WHERE id=?').get(order.vpLeftEyeLensTypeId) : null
   order.payments = d.prepare('SELECT * FROM payments WHERE orderId=? ORDER BY createdAt DESC').all(order.id)
   return order
 }
