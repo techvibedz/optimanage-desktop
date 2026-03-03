@@ -64,6 +64,8 @@ export function getQueueLength(): number {
 /**
  * Process the offline queue. Accepts a handler map that maps action strings
  * to async functions that execute the actual Prisma operations.
+ * Handlers should return the new Prisma record (with .id) so we can track
+ * local_id → real_id mappings for dependent entities.
  * Returns the number of successfully processed items.
  */
 export async function processQueue(
@@ -77,13 +79,15 @@ export async function processQueue(
   const queue = readQueue()
   if (queue.length === 0) return 0
 
-  // Sort queue: customers first, then orders, then prescriptions, then payments
-  const priority: Record<string, number> = { 'customers:create': 0, 'orders:create': 1, 'prescriptions:create': 1, 'payments:create': 2 }
+  // Sort queue: customers first, then prescriptions, then orders, then payments
+  const priority: Record<string, number> = { 'customers:create': 0, 'prescriptions:create': 1, 'orders:create': 2, 'payments:create': 3 }
   queue.sort((a, b) => (priority[a.action] ?? 9) - (priority[b.action] ?? 9))
 
   console.log(`[SyncManager] Processing ${queue.length} queued items...`)
   let processed = 0
   const remaining: QueueItem[] = []
+  // Track local_id → real Prisma id mappings
+  const idMap: Record<string, string> = {}
 
   for (const item of queue) {
     const handler = handlers[item.action]
@@ -92,8 +96,26 @@ export async function processQueue(
       continue
     }
 
+    // Replace any local_ references in the payload with their real synced IDs
+    if (Object.keys(idMap).length > 0) {
+      const payloadStr = JSON.stringify(item.payload)
+      let replaced = payloadStr
+      for (const [localId, realId] of Object.entries(idMap)) {
+        replaced = replaced.split(localId).join(realId)
+      }
+      if (replaced !== payloadStr) {
+        item.payload = JSON.parse(replaced)
+        console.log(`[SyncManager] Replaced local IDs in ${item.action} payload`)
+      }
+    }
+
     try {
-      await handler(item.payload)
+      const result = await handler(item.payload)
+      // Store the ID mapping if the handler returned a record with an id
+      if (result?.id && item.id?.startsWith('local_')) {
+        idMap[item.id] = result.id
+        console.log(`[SyncManager] ID mapping: ${item.id} → ${result.id}`)
+      }
       processed++
       console.log(`[SyncManager] ✓ Synced ${item.action} (${item.id})`)
     } catch (err: any) {

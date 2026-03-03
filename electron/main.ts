@@ -126,8 +126,9 @@ function getSyncHandlers() {
       if (payload.insuranceCoverageDetails) data.insuranceCoverageDetails = payload.insuranceCoverageDetails
       if (payload.notes) data.notes = payload.notes
       if (payload.createdAt) data.createdAt = new Date(payload.createdAt)
-      await prisma.customer.create({ data })
-      console.log('[SyncHandler] customers:create — done')
+      const created = await prisma.customer.create({ data })
+      console.log('[SyncHandler] customers:create — done, id:', created.id)
+      return created
     },
     'orders:create': async (payload: any) => {
       console.log('[SyncHandler] orders:create — starting sync for', payload.id || 'unknown')
@@ -168,14 +169,12 @@ function getSyncHandlers() {
       // createdAt — convert string to Date if provided
       if (payload.createdAt) createData.createdAt = new Date(payload.createdAt)
 
-      // Skip if customerId is a local_ ID (customer hasn't synced yet)
-      if (createData.customerId && createData.customerId.startsWith('local_')) {
-        console.warn('[SyncHandler] orders:create — customerId is local, will retry later')
-        throw new Error('Customer not synced yet')
-      }
-      // Strip local_ prefix IDs from relation fields (they don't exist in Prisma)
-      for (const key of ['prescriptionId', 'frameId', 'lensTypeId', 'vlRightEyeLensTypeId', 'vlLeftEyeLensTypeId', 'vpRightEyeLensTypeId', 'vpLeftEyeLensTypeId']) {
-        if (createData[key] && createData[key].startsWith('local_')) delete createData[key]
+      // If any FK still references a local_ ID, the dependency hasn't synced yet — retry later
+      for (const key of ['customerId', 'prescriptionId', 'frameId', 'lensTypeId', 'vlRightEyeLensTypeId', 'vlLeftEyeLensTypeId', 'vpRightEyeLensTypeId', 'vpLeftEyeLensTypeId']) {
+        if (createData[key] && createData[key].startsWith('local_')) {
+          console.warn(`[SyncHandler] orders:create — ${key} is still local (${createData[key]}), will retry after dependency syncs`)
+          throw new Error(`Dependency not synced yet: ${key}`)
+        }
       }
 
       // Compute a proper server-side order number
@@ -196,6 +195,8 @@ function getSyncHandlers() {
 
       const order = await prisma.order.create({ data: createData })
       console.log('[SyncHandler] orders:create — created order:', order.id, order.orderNumber)
+      // Return order so processQueue can map local_id → real id
+      const returnOrder = order
 
       if (payload.depositAmount && payload.depositAmount > 0) {
         await prisma.payment.create({
@@ -216,6 +217,7 @@ function getSyncHandlers() {
           data: { stock: { decrement: 1 } },
         })
       }
+      return returnOrder
     },
     'payments:create': async (payload: any) => {
       const data = { ...payload }
@@ -267,8 +269,9 @@ function getSyncHandlers() {
         if (payload[f] != null) data[f] = payload[f]
       }
       if (payload.createdAt) data.createdAt = new Date(payload.createdAt)
-      await prisma.prescription.create({ data })
-      console.log('[SyncHandler] prescriptions:create — done')
+      const created = await prisma.prescription.create({ data })
+      console.log('[SyncHandler] prescriptions:create — done, id:', created.id)
+      return created
     },
   } as Record<string, (payload: any) => Promise<any>>
 }
