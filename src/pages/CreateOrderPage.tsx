@@ -574,6 +574,16 @@ export default function CreateOrderPage() {
 
   const handleCreateCustomer = async () => {
     if (!newCustFirstName.trim()) { toast.error('Le prénom est requis'); return }
+    // Duplicate check
+    const fn = newCustFirstName.trim().toLowerCase()
+    const ln = (newCustLastName.trim() || '').toLowerCase()
+    const duplicate = customers.find(c =>
+      c.firstName?.toLowerCase() === fn && (c.lastName || '').toLowerCase() === ln
+    )
+    if (duplicate) {
+      toast.error(`Le client "${newCustFirstName.trim()} ${newCustLastName.trim()}" existe déjà.`)
+      return
+    }
     setNewCustCreating(true)
     try {
       const res = await window.electronAPI.createCustomer({
@@ -1071,11 +1081,14 @@ export default function CreateOrderPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <input value={newCustFirstName} onChange={e => setNewCustFirstName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleCreateCustomer() }}
                     placeholder={t('customers.firstName') || 'First name'} className="px-3 py-2 border border-border rounded-lg text-sm bg-background" />
                   <input value={newCustLastName} onChange={e => setNewCustLastName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleCreateCustomer() }}
                     placeholder={t('customers.lastName') || 'Last name'} className="px-3 py-2 border border-border rounded-lg text-sm bg-background" />
                 </div>
                 <input value={newCustPhone} onChange={e => setNewCustPhone(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleCreateCustomer() }}
                   placeholder={t('customers.phone') || 'Phone'} className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background" />
                 <button type="button" onClick={handleCreateCustomer} disabled={newCustCreating || !newCustFirstName.trim()}
                   className="w-full py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-1.5">
