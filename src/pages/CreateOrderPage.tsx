@@ -573,12 +573,12 @@ export default function CreateOrderPage() {
   }
 
   const handleCreateCustomer = async () => {
-    if (!newCustFirstName.trim() || !newCustLastName.trim()) { toast.error('First and last name required'); return }
+    if (!newCustFirstName.trim()) { toast.error('Le prénom est requis'); return }
     setNewCustCreating(true)
     try {
       const res = await window.electronAPI.createCustomer({
         firstName: newCustFirstName.trim(),
-        lastName: newCustLastName.trim(),
+        lastName: newCustLastName.trim() || '',
         phone: newCustPhone.trim() || undefined,
         userId: user!.id,
       })
@@ -1077,7 +1077,7 @@ export default function CreateOrderPage() {
                 </div>
                 <input value={newCustPhone} onChange={e => setNewCustPhone(e.target.value)}
                   placeholder={t('customers.phone') || 'Phone'} className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background" />
-                <button type="button" onClick={handleCreateCustomer} disabled={newCustCreating || !newCustFirstName.trim() || !newCustLastName.trim()}
+                <button type="button" onClick={handleCreateCustomer} disabled={newCustCreating || !newCustFirstName.trim()}
                   className="w-full py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-1.5">
                   <Plus className="h-3.5 w-3.5" /> {newCustCreating ? '...' : (t('common.create') || 'Create')}
                 </button>
