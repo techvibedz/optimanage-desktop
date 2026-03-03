@@ -144,29 +144,6 @@ app.whenReady().then(() => {
       sendStatus('error', { message: err.message })
     })
 
-    // IPC handlers for renderer control
-    ipcMain.handle('updater:check', async () => {
-      try {
-        await autoUpdater.checkForUpdates()
-        return { success: true }
-      } catch (err: any) {
-        return { error: err.message }
-      }
-    })
-
-    ipcMain.handle('updater:download', async () => {
-      try {
-        await autoUpdater.downloadUpdate()
-        return { success: true }
-      } catch (err: any) {
-        return { error: err.message }
-      }
-    })
-
-    ipcMain.handle('updater:install', () => {
-      autoUpdater.quitAndInstall()
-    })
-
     // Check for updates after 5 seconds (avoid blocking startup)
     setTimeout(() => {
       console.log('Auto-update: initiating check. App version:', app.getVersion())
@@ -175,6 +152,32 @@ app.whenReady().then(() => {
       })
     }, 5000)
   }
+
+  // Updater IPC handlers — registered always (stubs in dev, real in production)
+  ipcMain.handle('updater:check', async () => {
+    if (!app.isPackaged) return { success: true }
+    try {
+      await autoUpdater.checkForUpdates()
+      return { success: true }
+    } catch (err: any) {
+      return { error: err.message }
+    }
+  })
+
+  ipcMain.handle('updater:download', async () => {
+    if (!app.isPackaged) return { success: true }
+    try {
+      await autoUpdater.downloadUpdate()
+      return { success: true }
+    } catch (err: any) {
+      return { error: err.message }
+    }
+  })
+
+  ipcMain.handle('updater:install', () => {
+    if (!app.isPackaged) return
+    autoUpdater.quitAndInstall()
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
