@@ -6,10 +6,11 @@ import fs from 'node:fs'
 import Module from 'node:module'
 import { addToQueue, getQueueLength, processQueue, isOnline } from './syncManager'
 import {
-  hydrateCache, cacheCustomer, cacheOrder, cachePayment, cachePrescription, cacheFrame, cacheLensType, cacheSetting, cacheExpense,
+  hydrateCache, cacheCustomer, cacheOrder, cachePayment, cachePrescription, cacheFrame, cacheLensType, cacheSetting, cacheExpense, cacheUser,
   getLocalCustomers, getLocalCustomer, getLocalOrders, getLocalOrder, getLocalPrescriptions, getLocalPayments,
-  getLocalFrames, getLocalLensTypes, getLocalSettings, getLocalExpenses, getLocalDashboardStats,
+  getLocalFrames, getLocalLensTypes, getLocalSettings, getLocalExpenses, getLocalDashboardStats, getLocalUser,
   createLocalCustomer, createLocalOrder, createLocalPayment, createLocalPrescription,
+  deleteLocalCustomer, deleteLocalOrder, deleteLocalPayment, deleteLocalPrescription, deleteLocalFrame, deleteLocalLensType, deleteLocalExpense,
 } from './localCache'
 
 // ─── Prisma: redirect requires to extraResources in production ───────────────
@@ -331,6 +332,7 @@ let currentUser = loadSession()
 function registerIpcHandlers() {
   // ── Auth ──────────────────────────────────────────────────────────────────
   ipcMain.handle('auth:login', async (_e, email: string, password: string) => {
+    // Try online login first
     try {
       const user = await prisma.user.findUnique({ where: { email } })
       if (!user) return { error: 'Invalid email or password' }
@@ -338,12 +340,27 @@ function registerIpcHandlers() {
       const passwordMatch = await bcrypt.compare(password, user.password)
       if (!passwordMatch) return { error: 'Invalid email or password' }
 
+      // Cache user (including hashed password) for offline login
+      cacheUser(user)
       currentUser = { id: user.id, email: user.email, name: user.name, role: user.role }
       saveSession(currentUser)
       // Hydrate local cache in background for offline support
       hydrateCache(prisma, user.id).catch((e: any) => console.warn('[Login] Cache hydration error:', e.message))
       return { data: { user: currentUser } }
     } catch (err: any) {
+      // Offline login fallback: check local SQLite cache
+      if (!isOnline()) {
+        const localUser = getLocalUser(email)
+        if (localUser) {
+          const passwordMatch = await bcrypt.compare(password, localUser.password)
+          if (passwordMatch) {
+            currentUser = { id: localUser.id, email: localUser.email, name: localUser.name, role: localUser.role }
+            saveSession(currentUser)
+            return { data: { user: currentUser } }
+          }
+        }
+        return { error: 'Cannot login offline — no cached credentials. Please login online first.' }
+      }
       return { error: err.message || 'Login failed' }
     }
   })
@@ -357,7 +374,9 @@ function registerIpcHandlers() {
   ipcMain.handle('auth:session', async () => {
     if (!currentUser) return { data: null }
     // Refresh local cache in background on session restore
-    if (isOnline()) hydrateCache(prisma, currentUser.id).catch(() => {})
+    try {
+      if (isOnline()) await hydrateCache(prisma, currentUser.id)
+    } catch { /* ignore — cache from last successful hydration is still valid */ }
     return { data: { user: currentUser } }
   })
 
@@ -418,6 +437,7 @@ function registerIpcHandlers() {
   ipcMain.handle('customers:update', async (_e, id: string, updates: any) => {
     try {
       const data = await prisma.customer.update({ where: { id }, data: updates })
+      cacheCustomer(data)
       return { data }
     } catch (err: any) { return { error: err.message } }
   })
@@ -425,6 +445,7 @@ function registerIpcHandlers() {
   ipcMain.handle('customers:delete', async (_e, id: string) => {
     try {
       await prisma.customer.delete({ where: { id } })
+      deleteLocalCustomer(id)
       return { success: true }
     } catch (err: any) { return { error: err.message } }
   })
@@ -578,6 +599,7 @@ function registerIpcHandlers() {
   ipcMain.handle('orders:update', async (_e, id: string, updates: any) => {
     try {
       const data = await prisma.order.update({ where: { id }, data: updates })
+      cacheOrder(data)
       return { data }
     } catch (err: any) { return { error: err.message } }
   })
@@ -585,6 +607,7 @@ function registerIpcHandlers() {
   ipcMain.handle('orders:delete', async (_e, id: string) => {
     try {
       await prisma.order.delete({ where: { id } })
+      deleteLocalOrder(id)
       return { success: true }
     } catch (err: any) { return { error: err.message } }
   })
@@ -658,6 +681,7 @@ function registerIpcHandlers() {
   ipcMain.handle('prescriptions:update', async (_e, id: string, updates: any) => {
     try {
       const data = await prisma.prescription.update({ where: { id }, data: updates })
+      cachePrescription(data)
       return { data }
     } catch (err: any) { return { error: err.message } }
   })
@@ -665,6 +689,7 @@ function registerIpcHandlers() {
   ipcMain.handle('prescriptions:delete', async (_e, id: string) => {
     try {
       await prisma.prescription.delete({ where: { id } })
+      deleteLocalPrescription(id)
       return { success: true }
     } catch (err: any) { return { error: err.message } }
   })
@@ -691,18 +716,27 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('frames:create', async (_e, frame: any) => {
-    try { return { data: await prisma.frame.create({ data: frame }) } }
-    catch (err: any) { return { error: err.message } }
+    try {
+      const data = await prisma.frame.create({ data: frame })
+      cacheFrame(data)
+      return { data }
+    } catch (err: any) { return { error: err.message } }
   })
 
   ipcMain.handle('frames:update', async (_e, id: string, updates: any) => {
-    try { return { data: await prisma.frame.update({ where: { id }, data: updates }) } }
-    catch (err: any) { return { error: err.message } }
+    try {
+      const data = await prisma.frame.update({ where: { id }, data: updates })
+      cacheFrame(data)
+      return { data }
+    } catch (err: any) { return { error: err.message } }
   })
 
   ipcMain.handle('frames:delete', async (_e, id: string) => {
-    try { await prisma.frame.delete({ where: { id } }); return { success: true } }
-    catch (err: any) { return { error: err.message } }
+    try {
+      await prisma.frame.delete({ where: { id } })
+      deleteLocalFrame(id)
+      return { success: true }
+    } catch (err: any) { return { error: err.message } }
   })
 
   // ── Lens Types ────────────────────────────────────────────────────────────
@@ -726,18 +760,27 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('lensTypes:create', async (_e, lensType: any) => {
-    try { return { data: await prisma.lensType.create({ data: lensType }) } }
-    catch (err: any) { return { error: err.message } }
+    try {
+      const data = await prisma.lensType.create({ data: lensType })
+      cacheLensType(data)
+      return { data }
+    } catch (err: any) { return { error: err.message } }
   })
 
   ipcMain.handle('lensTypes:update', async (_e, id: string, updates: any) => {
-    try { return { data: await prisma.lensType.update({ where: { id }, data: updates }) } }
-    catch (err: any) { return { error: err.message } }
+    try {
+      const data = await prisma.lensType.update({ where: { id }, data: updates })
+      cacheLensType(data)
+      return { data }
+    } catch (err: any) { return { error: err.message } }
   })
 
   ipcMain.handle('lensTypes:delete', async (_e, id: string) => {
-    try { await prisma.lensType.delete({ where: { id } }); return { success: true } }
-    catch (err: any) { return { error: err.message } }
+    try {
+      await prisma.lensType.delete({ where: { id } })
+      deleteLocalLensType(id)
+      return { success: true }
+    } catch (err: any) { return { error: err.message } }
   })
 
   // ── Contact Lenses ──────────────────────────────────────────────────────
@@ -853,8 +896,11 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('payments:delete', async (_e, id: string) => {
-    try { await prisma.payment.delete({ where: { id } }); return { success: true } }
-    catch (err: any) { return { error: err.message } }
+    try {
+      await prisma.payment.delete({ where: { id } })
+      deleteLocalPayment(id)
+      return { success: true }
+    } catch (err: any) { return { error: err.message } }
   })
 
   // ── Expenses ──────────────────────────────────────────────────────────────
@@ -876,14 +922,23 @@ function registerIpcHandlers() {
         prisma.expense.findMany({ where, orderBy: { date: 'desc' }, skip: offset, take: limit }),
       ])
 
+      for (const e of expenses) cacheExpense(e)
       return { data: { expenses, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (!isOnline()) {
+        const local = getLocalExpenses(params.userId, params)
+        return { data: { expenses: local.expenses, pagination: { total: local.total, pages: Math.ceil(local.total / (params.limit || 10)), page: params.page || 1, limit: params.limit || 10 } } }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('expenses:create', async (_e, expense: any) => {
     try {
       if (expense.date && typeof expense.date === 'string') expense.date = new Date(expense.date)
-      return { data: await prisma.expense.create({ data: expense }) }
+      const data = await prisma.expense.create({ data: expense })
+      cacheExpense(data)
+      return { data }
     }
     catch (err: any) { return { error: err.message } }
   })
@@ -891,14 +946,19 @@ function registerIpcHandlers() {
   ipcMain.handle('expenses:update', async (_e, id: string, updates: any) => {
     try {
       if (updates.date && typeof updates.date === 'string') updates.date = new Date(updates.date)
-      return { data: await prisma.expense.update({ where: { id }, data: updates }) }
+      const data = await prisma.expense.update({ where: { id }, data: updates })
+      cacheExpense(data)
+      return { data }
     }
     catch (err: any) { return { error: err.message } }
   })
 
   ipcMain.handle('expenses:delete', async (_e, id: string) => {
-    try { await prisma.expense.delete({ where: { id } }); return { success: true } }
-    catch (err: any) { return { error: err.message } }
+    try {
+      await prisma.expense.delete({ where: { id } })
+      deleteLocalExpense(id)
+      return { success: true }
+    } catch (err: any) { return { error: err.message } }
   })
 
   // ── Settings ──────────────────────────────────────────────────────────────

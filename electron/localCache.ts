@@ -166,6 +166,16 @@ function initTables() {
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE,
+      name TEXT NOT NULL,
+      password TEXT NOT NULL,
+      role TEXT DEFAULT 'ASSISTANT',
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
   `)
 }
 
@@ -281,6 +291,53 @@ export function cacheExpense(e: any) {
   )
 }
 
+export function cacheUser(u: any) {
+  const d = getDb()
+  d.prepare(`INSERT OR REPLACE INTO users (id,email,name,password,role,createdAt,updatedAt)
+    VALUES (?,?,?,?,?,?,?)`).run(
+    u.id, u.email, u.name, u.password, u.role||'ASSISTANT',
+    toIso(u.createdAt), toIso(u.updatedAt)
+  )
+}
+
+export function getLocalUser(email: string): any {
+  return getDb().prepare('SELECT * FROM users WHERE email=?').get(email) || null
+}
+
+// ─── Delete helpers (for cache consistency on online deletes) ────────────────
+
+export function deleteLocalCustomer(id: string) {
+  const d = getDb()
+  d.prepare('DELETE FROM prescriptions WHERE customerId=?').run(id)
+  d.prepare('DELETE FROM customers WHERE id=?').run(id)
+}
+
+export function deleteLocalOrder(id: string) {
+  const d = getDb()
+  d.prepare('DELETE FROM payments WHERE orderId=?').run(id)
+  d.prepare('DELETE FROM orders WHERE id=?').run(id)
+}
+
+export function deleteLocalPayment(id: string) {
+  getDb().prepare('DELETE FROM payments WHERE id=?').run(id)
+}
+
+export function deleteLocalPrescription(id: string) {
+  getDb().prepare('DELETE FROM prescriptions WHERE id=?').run(id)
+}
+
+export function deleteLocalFrame(id: string) {
+  getDb().prepare('DELETE FROM frames WHERE id=?').run(id)
+}
+
+export function deleteLocalLensType(id: string) {
+  getDb().prepare('DELETE FROM lensTypes WHERE id=?').run(id)
+}
+
+export function deleteLocalExpense(id: string) {
+  getDb().prepare('DELETE FROM expenses WHERE id=?').run(id)
+}
+
 // ─── Bulk hydrate: download all data for a user and store locally ───────────
 export async function hydrateCache(prisma: any, userId: string) {
   console.log('[LocalCache] Hydrating local cache for user', userId)
@@ -317,7 +374,7 @@ export async function hydrateCache(prisma: any, userId: string) {
 
 // ─── Offline READ helpers ───────────────────────────────────────────────────
 
-export function getLocalCustomers(userId: string, search?: string, limit = 50): any[] {
+export function getLocalCustomers(userId: string, search?: string, limit = 500): any[] {
   const d = getDb()
   if (search) {
     const s = `%${search}%`
@@ -450,12 +507,15 @@ export function createLocalCustomer(data: any): any {
 
 export function createLocalOrder(data: any, userId: string): any {
   const d = getDb()
-  // Compute order number from local cache
-  const maxRow = d.prepare(`SELECT orderNumber FROM orders WHERE userId=? ORDER BY orderNumber DESC LIMIT 1`).get(userId) as any
+  // Compute order number from local cache — scan ALL orders to find the real max number
+  const allOrders = d.prepare(`SELECT orderNumber FROM orders WHERE userId=?`).all(userId) as any[]
   let maxNum = 0
-  if (maxRow?.orderNumber) {
-    const match = maxRow.orderNumber.match(/ORD-(\d+)/)
-    if (match) maxNum = parseInt(match[1], 10)
+  for (const o of allOrders) {
+    const match = o.orderNumber?.match(/ORD-(\d+)/)
+    if (match) {
+      const num = parseInt(match[1], 10)
+      if (num > maxNum) maxNum = num
+    }
   }
   const orderNumber = `ORD-${String(maxNum + 1).padStart(3, '0')}`
   const id = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
