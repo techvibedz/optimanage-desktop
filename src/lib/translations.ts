@@ -150,6 +150,13 @@ export const translations: Record<Language, Translations> = {
     'dashboard.outstanding': 'Outstanding',
     'dashboard.collectionRate': 'Collection Rate',
     'dashboard.paymentMethods': 'Payment Methods',
+    'dashboard.recentOrders': 'Recent Orders',
+    'dashboard.noOrders': 'No orders yet',
+    'dashboard.recentActivity': 'Recent Activity',
+    'dashboard.noActivity': 'No activity yet',
+
+    // Common (continued)
+    'common.viewAll': 'View All',
 
     // Customers
     'customers.title': 'Customers',
@@ -589,6 +596,13 @@ export const translations: Record<Language, Translations> = {
     'dashboard.outstanding': 'Impay\u00e9s',
     'dashboard.collectionRate': 'Taux de recouvrement',
     'dashboard.paymentMethods': 'M\u00e9thodes de paiement',
+
+    'dashboard.recentOrders': 'Commandes r\u00e9centes',
+    'dashboard.noOrders': 'Aucune commande',
+    'dashboard.recentActivity': 'Activit\u00e9 r\u00e9cente',
+    'dashboard.noActivity': 'Aucune activit\u00e9',
+
+    'common.viewAll': 'Voir tout',
 
     // Customers
     'customers.title': 'Clients',
