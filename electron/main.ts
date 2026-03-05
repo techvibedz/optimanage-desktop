@@ -524,7 +524,12 @@ function registerIpcHandlers() {
         take: params.limit || 50,
       })
       for (const c of data) cacheCustomer(c)
-      return { data }
+      // Merge any unsynced local_ entries that aren't in remote results yet
+      const remoteIds = new Set(data.map((c: any) => c.id))
+      const localCustomers = getLocalCustomers(params.userId, params.query, params.limit)
+      const unsyncedLocal = localCustomers.filter((c: any) => c.id.startsWith('local_') && !remoteIds.has(c.id))
+      const merged = [...unsyncedLocal, ...data]
+      return { data: merged }
     } catch (err: any) {
       if (isDbError(err)) return { data: getLocalCustomers(params.userId, params.query, params.limit) }
       return { error: err.message }
@@ -636,6 +641,16 @@ function registerIpcHandlers() {
       ])
 
       for (const o of orders) cacheOrder(o)
+      // Merge any unsynced local_ orders that aren't in remote results yet (page 1 only)
+      if (page === 1) {
+        const remoteIds = new Set(orders.map((o: any) => o.id))
+        const localData = getLocalOrders(params.userId, params)
+        const unsyncedLocal = localData.orders.filter((o: any) => o.id.startsWith('local_') && !remoteIds.has(o.id))
+        if (unsyncedLocal.length > 0) {
+          const merged = [...unsyncedLocal, ...orders]
+          return { data: { orders: merged, pagination: { total: total + unsyncedLocal.length, pages: Math.ceil((total + unsyncedLocal.length) / limit), page, limit } } }
+        }
+      }
       return { data: { orders, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
       if (isDbError(err)) {
@@ -808,6 +823,16 @@ function registerIpcHandlers() {
       ])
 
       for (const rx of prescriptions) cachePrescription(rx)
+      // Merge any unsynced local_ prescriptions (page 1 only)
+      if (page === 1 && params.customerId) {
+        const remoteIds = new Set(prescriptions.map((rx: any) => rx.id))
+        const localRxs = getLocalPrescriptions(params.customerId)
+        const unsyncedLocal = localRxs.filter((rx: any) => rx.id.startsWith('local_') && !remoteIds.has(rx.id))
+        if (unsyncedLocal.length > 0) {
+          const merged = [...unsyncedLocal, ...prescriptions]
+          return { data: { prescriptions: merged, pagination: { total: total + unsyncedLocal.length, pages: Math.ceil((total + unsyncedLocal.length) / limit), page, limit } } }
+        }
+      }
       return { data: { prescriptions, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
       if (isDbError(err) && params.customerId) {
@@ -1014,6 +1039,16 @@ function registerIpcHandlers() {
       ])
 
       for (const p of payments) cachePayment(p)
+      // Merge any unsynced local_ payments (page 1 only)
+      if (page === 1) {
+        const remoteIds = new Set(payments.map((p: any) => p.id))
+        const localData = getLocalPayments(params.userId, params)
+        const unsyncedLocal = localData.payments.filter((p: any) => p.id.startsWith('local_') && !remoteIds.has(p.id))
+        if (unsyncedLocal.length > 0) {
+          const merged = [...unsyncedLocal, ...payments]
+          return { data: { payments: merged, pagination: { total: total + unsyncedLocal.length, pages: Math.ceil((total + unsyncedLocal.length) / limit), page, limit } } }
+        }
+      }
       return { data: { payments, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
       if (isDbError(err)) {
