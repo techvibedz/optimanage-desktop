@@ -3,10 +3,9 @@ import { Outlet } from 'react-router-dom'
 import { WifiOff } from 'lucide-react'
 import Sidebar from './Sidebar'
 import UpdateModal from './UpdateModal'
-import { useTranslation } from '@/lib/use-translation'
+import { t } from '@/lib/translations'
 
 function NoInternetOverlay() {
-  const { t } = useTranslation()
   const [offline, setOffline] = useState(!navigator.onLine)
 
   useEffect(() => {
@@ -29,17 +28,17 @@ function NoInternetOverlay() {
           <WifiOff className="h-8 w-8 text-red-500" />
         </div>
         <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-          {t('offline.title') || 'Pas de connexion Internet'}
+          {t('offline.title')}
         </h2>
         <p className="text-gray-500 dark:text-gray-400 text-sm leading-relaxed">
-          {t('offline.message') || "Vérifiez votre connexion Internet et réessayez. L'application nécessite une connexion active pour fonctionner."}
+          {t('offline.message')}
         </p>
         <div className="mt-6 flex items-center justify-center gap-2 text-xs text-gray-400 dark:text-gray-500">
           <span className="relative flex h-2 w-2">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-50" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
           </span>
-          {t('offline.waiting') || 'En attente de connexion...'}
+          {t('offline.waiting')}
         </div>
       </div>
     </div>

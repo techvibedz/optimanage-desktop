@@ -158,10 +158,10 @@ export const translations: Record<Language, Translations> = {
     // Common (continued)
     'common.viewAll': 'View All',
 
-    // Sync
-    'sync.online': 'Online',
-    'sync.offline': 'Offline Mode',
-    'sync.syncing': 'Syncing',
+    // Offline overlay
+    'offline.title': 'No Internet Connection',
+    'offline.message': 'Please check your internet connection and try again. The application requires an active connection to work.',
+    'offline.waiting': 'Waiting for connection...',
 
     // Customers
     'customers.title': 'Customers',
@@ -609,10 +609,10 @@ export const translations: Record<Language, Translations> = {
 
     'common.viewAll': 'Voir tout',
 
-    // Sync
-    'sync.online': 'En ligne',
-    'sync.offline': 'Mode Hors Ligne',
-    'sync.syncing': 'Synchronisation',
+    // Offline overlay
+    'offline.title': 'Pas de connexion Internet',
+    'offline.message': "Vérifiez votre connexion Internet et réessayez. L'application nécessite une connexion active pour fonctionner.",
+    'offline.waiting': 'En attente de connexion...',
 
     // Customers
     'customers.title': 'Clients',
