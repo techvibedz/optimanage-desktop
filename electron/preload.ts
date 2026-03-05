@@ -78,15 +78,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // AI
   scanOrdonnance: (imageBase64: string) => ipcRenderer.invoke('ai:scanOrdonnance', imageBase64),
 
-  // Sync (offline queue)
-  forceSync: () => ipcRenderer.invoke('sync:forceSync'),
-  getSyncStatus: () => ipcRenderer.invoke('sync:getStatus'),
-  onSyncStatus: (callback: (_status: { isOnline: boolean; pendingItems: number }) => void) => {
-    const handler = (_event: any, status: { isOnline: boolean; pendingItems: number }) => callback(status)
-    ipcRenderer.on('sync:status', handler)
-    return () => { ipcRenderer.removeListener('sync:status', handler) }
-  },
-
   // Updater
   checkUpdate: () => ipcRenderer.invoke('updater:check'),
   downloadUpdate: () => ipcRenderer.invoke('updater:download'),
