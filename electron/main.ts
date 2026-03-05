@@ -127,6 +127,9 @@ function getSyncHandlers() {
       if (payload.notes) data.notes = payload.notes
       if (payload.createdAt) data.createdAt = new Date(payload.createdAt)
       const created = await prisma.customer.create({ data })
+      // Clean up local_ cache entry and store the real one
+      if (payload.id?.startsWith('local_')) deleteLocalCustomer(payload.id)
+      cacheCustomer(created)
       console.log('[SyncHandler] customers:create — done, id:', created.id)
       return created
     },
@@ -217,6 +220,9 @@ function getSyncHandlers() {
           data: { stock: { decrement: 1 } },
         })
       }
+      // Clean up local_ cache entry and store the real synced order
+      if (payload.id?.startsWith('local_')) deleteLocalOrder(payload.id)
+      cacheOrder(order)
       return returnOrder
     },
     'payments:create': async (payload: any) => {
@@ -270,6 +276,9 @@ function getSyncHandlers() {
       }
       if (payload.createdAt) data.createdAt = new Date(payload.createdAt)
       const created = await prisma.prescription.create({ data })
+      // Clean up local_ cache entry and store the real one
+      if (payload.id?.startsWith('local_')) deleteLocalPrescription(payload.id)
+      cachePrescription(created)
       console.log('[SyncHandler] prescriptions:create — done, id:', created.id)
       return created
     },
@@ -528,8 +537,16 @@ function registerIpcHandlers() {
       const remoteIds = new Set(data.map((c: any) => c.id))
       const localCustomers = getLocalCustomers(params.userId, params.query, params.limit)
       const unsyncedLocal = localCustomers.filter((c: any) => c.id.startsWith('local_') && !remoteIds.has(c.id))
-      const merged = [...unsyncedLocal, ...data]
-      return { data: merged }
+      if (unsyncedLocal.length > 0) {
+        const merged = [...unsyncedLocal, ...data]
+        merged.sort((a: any, b: any) => {
+          const la = (a.lastName || '').toLowerCase(), lb = (b.lastName || '').toLowerCase()
+          if (la !== lb) return la.localeCompare(lb)
+          return (a.firstName || '').toLowerCase().localeCompare((b.firstName || '').toLowerCase())
+        })
+        return { data: merged }
+      }
+      return { data }
     } catch (err: any) {
       console.warn('[customers:list] Prisma failed, falling back to local cache:', err.message)
       return { data: getLocalCustomers(params.userId, params.query, params.limit) }
@@ -651,6 +668,11 @@ function registerIpcHandlers() {
         const unsyncedLocal = localData.orders.filter((o: any) => o.id.startsWith('local_') && !remoteIds.has(o.id))
         if (unsyncedLocal.length > 0) {
           const merged = [...unsyncedLocal, ...orders]
+          merged.sort((a: any, b: any) => {
+            const da = new Date(a.createdAt).getTime() || 0
+            const db = new Date(b.createdAt).getTime() || 0
+            return db - da // newest first
+          })
           return { data: { orders: merged, pagination: { total: total + unsyncedLocal.length, pages: Math.ceil((total + unsyncedLocal.length) / limit), page, limit } } }
         }
       }
