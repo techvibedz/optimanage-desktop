@@ -203,100 +203,102 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
   // ═══════ BON ATELIER ═══════
   const Atelier = () => (
-    <div style={{ ...F, padding: compact ? '1.5mm 3mm' : '3mm 3.5mm', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <Header label="BON ATELIER" />
-      <div style={{ borderBottom: '2px solid #000', marginBottom: gap }} />
-      <InfoRow />
+    <div style={{ ...F, padding: compact ? '1.5mm 3mm' : '3mm 3.5mm', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
+      <div>
+        <Header label="BON ATELIER" />
+        <div style={{ borderBottom: '2px solid #000', marginBottom: gap }} />
+        <InfoRow />
 
-      {/* Prescription — only on atelier */}
-      {order.prescription && (
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: gap, border: '1px solid #000' }}>
-          <thead>
-            <tr>
-              <th style={{ ...hCell, width: '15%', textAlign: 'left' }}></th>
-              <th style={hCell}>Sph</th>
-              <th style={hCell}>Cyl</th>
-              <th style={hCell}>Axe</th>
-              <th style={hCell}>Add</th>
-            </tr>
-          </thead>
-          <tbody>
-            {hasVL && (
-              <>
-                <tr>
-                  <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>VL OD</td>
-                  <td style={cell}>{rx(order.prescription.vlRightEyeSphere)}</td>
-                  <td style={cell}>{rx(order.prescription.vlRightEyeCylinder)}</td>
-                  <td style={cell}>{ax(order.prescription.vlRightEyeAxis)}</td>
-                  <td style={cell}>-</td>
-                </tr>
-                <tr>
-                  <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>VL OS</td>
-                  <td style={cell}>{rx(order.prescription.vlLeftEyeSphere)}</td>
-                  <td style={cell}>{rx(order.prescription.vlLeftEyeCylinder)}</td>
-                  <td style={cell}>{ax(order.prescription.vlLeftEyeAxis)}</td>
-                  <td style={cell}>-</td>
-                </tr>
-              </>
-            )}
-            {hasVP && (
-              <>
-                <tr>
-                  <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>VP OD</td>
-                  <td style={cell}>{rx(order.prescription.vpRightEyeSphere)}</td>
-                  <td style={cell}>{rx(order.prescription.vpRightEyeCylinder)}</td>
-                  <td style={cell}>{ax(order.prescription.vpRightEyeAxis)}</td>
-                  <td style={cell}>{rx(order.prescription.vpRightEyeAdd)}</td>
-                </tr>
-                <tr>
-                  <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>VP OS</td>
-                  <td style={cell}>{rx(order.prescription.vpLeftEyeSphere)}</td>
-                  <td style={cell}>{rx(order.prescription.vpLeftEyeCylinder)}</td>
-                  <td style={cell}>{ax(order.prescription.vpLeftEyeAxis)}</td>
-                  <td style={cell}>{rx(order.prescription.vpLeftEyeAdd)}</td>
-                </tr>
-              </>
-            )}
-            {order.prescription.pupillaryDistance && (
+        {/* Prescription — only on atelier */}
+        {order.prescription && (
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: gap, border: '1px solid #000' }}>
+            <thead>
               <tr>
-                <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>EP</td>
-                <td colSpan={4} style={{ ...cell, fontWeight: 600 }}>{order.prescription.pupillaryDistance} mm</td>
+                <th style={{ ...hCell, width: '15%', textAlign: 'left' }}></th>
+                <th style={hCell}>Sph</th>
+                <th style={hCell}>Cyl</th>
+                <th style={hCell}>Axe</th>
+                <th style={hCell}>Add</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody>
+              {hasVL && (
+                <>
+                  <tr>
+                    <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>VL OD</td>
+                    <td style={cell}>{rx(order.prescription.vlRightEyeSphere)}</td>
+                    <td style={cell}>{rx(order.prescription.vlRightEyeCylinder)}</td>
+                    <td style={cell}>{ax(order.prescription.vlRightEyeAxis)}</td>
+                    <td style={cell}>-</td>
+                  </tr>
+                  <tr>
+                    <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>VL OS</td>
+                    <td style={cell}>{rx(order.prescription.vlLeftEyeSphere)}</td>
+                    <td style={cell}>{rx(order.prescription.vlLeftEyeCylinder)}</td>
+                    <td style={cell}>{ax(order.prescription.vlLeftEyeAxis)}</td>
+                    <td style={cell}>-</td>
+                  </tr>
+                </>
+              )}
+              {hasVP && (
+                <>
+                  <tr>
+                    <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>VP OD</td>
+                    <td style={cell}>{rx(order.prescription.vpRightEyeSphere)}</td>
+                    <td style={cell}>{rx(order.prescription.vpRightEyeCylinder)}</td>
+                    <td style={cell}>{ax(order.prescription.vpRightEyeAxis)}</td>
+                    <td style={cell}>{rx(order.prescription.vpRightEyeAdd)}</td>
+                  </tr>
+                  <tr>
+                    <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>VP OS</td>
+                    <td style={cell}>{rx(order.prescription.vpLeftEyeSphere)}</td>
+                    <td style={cell}>{rx(order.prescription.vpLeftEyeCylinder)}</td>
+                    <td style={cell}>{ax(order.prescription.vpLeftEyeAxis)}</td>
+                    <td style={cell}>{rx(order.prescription.vpLeftEyeAdd)}</td>
+                  </tr>
+                </>
+              )}
+              {order.prescription.pupillaryDistance && (
+                <tr>
+                  <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>EP</td>
+                  <td colSpan={4} style={{ ...cell, fontWeight: 600 }}>{order.prescription.pupillaryDistance} mm</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        )}
 
-      <LensTable />
+        <LensTable />
 
-      {/* Notes */}
-      {order.technicalNotes && (
-        <div style={{ fontSize: compact ? '6pt' : '6.5pt', border: '1px solid #000', padding: '0.3mm 1.5mm', marginBottom: gap, overflow: 'hidden', maxHeight: compact ? '5mm' : '6mm', lineHeight: '1.1' }}>
-          <strong>Notes:</strong> {order.technicalNotes}
-        </div>
-      )}
+        {/* Notes */}
+        {order.technicalNotes && (
+          <div style={{ fontSize: compact ? '6pt' : '6.5pt', border: '1px solid #000', padding: '0.3mm 1.5mm', marginBottom: gap, overflow: 'hidden', maxHeight: compact ? '5mm' : '6mm', lineHeight: '1.1' }}>
+            <strong>Notes:</strong> {order.technicalNotes}
+          </div>
+        )}
+      </div>
 
-      <div style={{ flex: 1 }} />
       <Footer large={false} />
     </div>
   )
 
   // ═══════ BON CLIENT ═══════
   const Client = () => (
-    <div style={{ ...F, padding: compact ? '1.5mm 3mm' : '3mm 3.5mm', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <Header label="BON CLIENT" />
-      <div style={{ borderBottom: '2px solid #000', marginBottom: gap }} />
-      <InfoRow />
-      <LensTable />
+    <div style={{ ...F, padding: compact ? '1.5mm 3mm' : '3mm 3.5mm', height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', overflow: 'hidden' }}>
+      <div>
+        <Header label="BON CLIENT" />
+        <div style={{ borderBottom: '2px solid #000', marginBottom: gap }} />
+        <InfoRow />
+        <LensTable />
 
-      {/* Ready date — prominent for client */}
-      {order.expectedCompletionDate && (
-        <div style={{ textAlign: 'center', border: '2px solid #000', padding: compact ? '0.5mm 1.5mm' : '1.5mm 3mm', marginBottom: gap, fontSize: compact ? '7pt' : '8.5pt', fontWeight: 800 }}>
-          Date de retrait: {fmtReady(order.expectedCompletionDate)}
-        </div>
-      )}
+        {/* Ready date — prominent for client */}
+        {order.expectedCompletionDate && (
+          <div style={{ textAlign: 'center', border: '2px solid #000', padding: compact ? '0.5mm 1.5mm' : '1.5mm 3mm', marginBottom: gap, fontSize: compact ? '7pt' : '8.5pt', fontWeight: 800 }}>
+            Date de retrait: {fmtReady(order.expectedCompletionDate)}
+          </div>
+        )}
+      </div>
 
-      <div style={{ flex: 1 }} />
       <Footer large={!compact} />
     </div>
   )
