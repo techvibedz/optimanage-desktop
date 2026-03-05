@@ -531,16 +531,19 @@ function registerIpcHandlers() {
       const merged = [...unsyncedLocal, ...data]
       return { data: merged }
     } catch (err: any) {
-      if (isDbError(err)) return { data: getLocalCustomers(params.userId, params.query, params.limit) }
-      return { error: err.message }
+      console.warn('[customers:list] Prisma failed, falling back to local cache:', err.message)
+      return { data: getLocalCustomers(params.userId, params.query, params.limit) }
     }
   })
 
   ipcMain.handle('customers:get', async (_e, id: string) => {
+    // Local_ IDs only exist in SQLite — skip Prisma entirely
+    if (id.startsWith('local_')) return { data: getLocalCustomer(id) }
     try {
       const data = await prisma.customer.findUnique({ where: { id } })
-      if (data) cacheCustomer(data)
-      return { data }
+      if (data) { cacheCustomer(data); return { data } }
+      // Not found in Prisma — try local cache (may have been synced with a different ID)
+      return { data: getLocalCustomer(id) }
     } catch (err: any) {
       if (isDbError(err)) return { data: getLocalCustomer(id) }
       return { error: err.message }
@@ -653,22 +656,23 @@ function registerIpcHandlers() {
       }
       return { data: { orders, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
-      if (isDbError(err)) {
-        const local = getLocalOrders(params.userId, params)
-        return { data: { orders: local.orders, pagination: { total: local.total, pages: Math.ceil(local.total / (params.limit || 10)), page: params.page || 1, limit: params.limit || 10 } } }
-      }
-      return { error: err.message }
+      console.warn('[orders:list] Prisma failed, falling back to local cache:', err.message)
+      const local = getLocalOrders(params.userId, params)
+      return { data: { orders: local.orders, pagination: { total: local.total, pages: Math.ceil(local.total / (params.limit || 10)), page: params.page || 1, limit: params.limit || 10 } } }
     }
   })
 
   ipcMain.handle('orders:get', async (_e, id: string) => {
+    // Local_ IDs only exist in SQLite — skip Prisma entirely
+    if (id.startsWith('local_')) return { data: getLocalOrder(id) }
     try {
       const data = await prisma.order.findUnique({
         where: { id },
         include: { customer: true, prescription: true, frame: true, lensType: true, payments: true, vlRightEyeLensType: true, vlLeftEyeLensType: true, vpRightEyeLensType: true, vpLeftEyeLensType: true },
       })
-      if (data) cacheOrder(data)
-      return { data }
+      if (data) { cacheOrder(data); return { data } }
+      // Not found in Prisma — try local cache
+      return { data: getLocalOrder(id) }
     } catch (err: any) {
       if (isDbError(err)) return { data: getLocalOrder(id) }
       return { error: err.message }
@@ -835,11 +839,12 @@ function registerIpcHandlers() {
       }
       return { data: { prescriptions, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
-      if (isDbError(err) && params.customerId) {
+      console.warn('[prescriptions:list] Prisma failed, falling back to local cache:', err.message)
+      if (params.customerId) {
         const rxs = getLocalPrescriptions(params.customerId)
         return { data: { prescriptions: rxs, pagination: { total: rxs.length, pages: 1, page: 1, limit: rxs.length } } }
       }
-      return { error: err.message }
+      return { data: { prescriptions: [], pagination: { total: 0, pages: 0, page: 1, limit: 10 } } }
     }
   })
 
@@ -1051,11 +1056,9 @@ function registerIpcHandlers() {
       }
       return { data: { payments, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
-      if (isDbError(err)) {
-        const local = getLocalPayments(params.userId, params)
-        return { data: { payments: local.payments, pagination: { total: local.total, pages: Math.ceil(local.total / (params.limit || 15)), page: params.page || 1, limit: params.limit || 15 } } }
-      }
-      return { error: err.message }
+      console.warn('[payments:list] Prisma failed, falling back to local cache:', err.message)
+      const local = getLocalPayments(params.userId, params)
+      return { data: { payments: local.payments, pagination: { total: local.total, pages: Math.ceil(local.total / (params.limit || 15)), page: params.page || 1, limit: params.limit || 15 } } }
     }
   })
 
