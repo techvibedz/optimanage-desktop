@@ -1046,7 +1046,7 @@ function registerIpcHandlers() {
 
 // ── AI: Scan Ordonnance (Google Gemini direct API) ──────────────────────
 function registerAiHandlers() {
-  const GEMINI_API_KEY = 'AIzaSyDTtRKUy3tXkKhuR7mXYEAigAPhtLmszi0'
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || ''
   const GEMINI_MODELS = [
     'gemini-2.5-flash-lite',
     'gemini-2.0-flash-lite',
@@ -1139,6 +1139,9 @@ You MUST respond with ONLY a valid JSON object, no markdown, no explanation, no 
   }
 
   ipcMain.handle('ai:scanOrdonnance', async (_e, imageBase64: string) => {
+    if (!GEMINI_API_KEY) {
+      return { error: 'Clé API Gemini non configurée. Ajoutez GEMINI_API_KEY dans le fichier .env' }
+    }
     try {
       // Detect mime type and strip data URI prefix
       let mimeType = 'image/jpeg'
