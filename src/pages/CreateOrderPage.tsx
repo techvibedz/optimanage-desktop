@@ -5,7 +5,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { toast } from 'sonner'
 import {
   Plus, Trash2, X, Printer, Search,
-  ChevronDown, Check, FileText, ScanLine, Loader2, Camera, Video
+  ChevronDown, Check, FileText, ScanLine, Loader2, Camera, Video, ListPlus
 } from 'lucide-react'
 import OrderSlip from '@/components/print/OrderSlip'
 
@@ -443,6 +443,11 @@ export default function CreateOrderPage() {
   const [autoScanStatus, setAutoScanStatus] = useState<'idle' | 'scanning' | 'analyzing' | 'found'>('idle')
   const autoScanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autoScanActiveRef = useRef(false)
+
+  // Order queue for batch create & print
+  const [orderQueue, setOrderQueue] = useState<any[]>([])
+  const [createdOrders, setCreatedOrders] = useState<any[]>([])
+  const [isBatchProcessing, setIsBatchProcessing] = useState(false)
 
   // Order number
   const [orderNumber, setOrderNumber] = useState('')
@@ -924,6 +929,128 @@ export default function CreateOrderPage() {
     setReadyDate(d.toISOString().split('T')[0])
   }
 
+  // ─── Build order data from current form state ─────────────────────────
+  const buildOrderData = () => {
+    const lensTypeId = vlRightLensId || vlLeftLensId || vpRightLensId || vpLeftLensId || undefined
+    return {
+      orderNumber,
+      customerId,
+      userId: user!.id,
+      prescriptionId: prescriptionId || undefined,
+      frameId: selectedFrames.length > 0 ? selectedFrames[0].id : undefined,
+      lensTypeId,
+      vlRightEyeLensTypeId: vlRightLensId || undefined,
+      vlLeftEyeLensTypeId: vlLeftLensId || undefined,
+      vpRightEyeLensTypeId: vpRightLensId || undefined,
+      vpLeftEyeLensTypeId: vpLeftLensId || undefined,
+      vlRightEyeLensQuantity: vlRightQty,
+      vlLeftEyeLensQuantity: vlLeftQty,
+      vpRightEyeLensQuantity: vpRightQty,
+      vpLeftEyeLensQuantity: vpLeftQty,
+      framePrice: framesTotal,
+      vlRightEyeLensPrice: vlRightLensPrice * vlRightQty,
+      vlLeftEyeLensPrice: vlLeftLensPrice * vlLeftQty,
+      vpRightEyeLensPrice: vpRightLensPrice * vpRightQty,
+      vpLeftEyeLensPrice: vpLeftLensPrice * vpLeftQty,
+      basePrice: framesTotal + lensTotal,
+      addonsPrice: servicesTotal + contactLensTotal,
+      totalPrice,
+      depositAmount,
+      balanceDue,
+      status: 'in_progress',
+      expectedCompletionDate: readyDate ? new Date(readyDate).toISOString() : new Date().toISOString(),
+      createdAt: orderDate ? new Date(orderDate).toISOString() : new Date().toISOString(),
+      customerNotes: notes,
+      technicalNotes: [
+        ...(selectedContactLenses.length > 0 ? [`Contact Lenses: ${selectedContactLenses.map(cl => `${cl.brand}${cl.model ? ' ' + cl.model : ''} x${cl.qty}: ${cl.price * cl.qty} DA`).join(', ')}`] : []),
+        ...(services.length > 0 ? [`Additional Services: ${services.map(s => `${s.name}: ${s.price} DA`).join(', ')}`] : []),
+      ].join(' | '),
+    }
+  }
+
+  // ─── Compute next order number from a given one ───────────────────────
+  const nextOrderNum = (current: string) => {
+    const match = current.match(/ORD-(\d+)/)
+    if (match) return `ORD-${String(parseInt(match[1], 10) + 1).padStart(3, '0')}`
+    return current
+  }
+
+  // ─── Reset form for next order ────────────────────────────────────────
+  const resetForm = () => {
+    setCustomerId('')
+    setPrescriptionId('')
+    setSelectedFrames([])
+    setVlRightLensId(''); setVlRightLensPrice(0); setVlRightQty(1)
+    setVlLeftLensId(''); setVlLeftLensPrice(0); setVlLeftQty(1)
+    setVpRightLensId(''); setVpRightLensPrice(0); setVpRightQty(1)
+    setVpLeftLensId(''); setVpLeftLensPrice(0); setVpLeftQty(1)
+    setSelectedContactLenses([])
+    setServices([]); setNewServiceName(''); setNewServicePrice('')
+    setDepositAmount(0)
+    setNotes('')
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
+    setReadyDate(tomorrow.toISOString().split('T')[0])
+    setOrderDate(new Date().toISOString().split('T')[0])
+  }
+
+  // ─── Add current order to queue ───────────────────────────────────────
+  const addToQueue = () => {
+    if (!customerId) { toast.error(t('orders.selectCustomerError')); return }
+    if (totalPrice <= 0) { toast.error(t('orders.totalPriceError')); return }
+    const data = buildOrderData()
+    const customerName = customers.find(c => c.id === customerId)
+    const label = customerName ? `${customerName.firstName} ${customerName.lastName}` : orderNumber
+    setOrderQueue(prev => [...prev, { data, label }])
+    toast.success(`${orderNumber} added to queue (${orderQueue.length + 1} orders)`)
+    const nextNum = nextOrderNum(orderNumber)
+    setOrderNumber(nextNum)
+    resetForm()
+  }
+
+  // ─── Process queue: create all orders + print all slips ───────────────
+  const processQueue = async (includeCurrent = false) => {
+    const items = [...orderQueue]
+    if (includeCurrent) {
+      if (!customerId) { toast.error(t('orders.selectCustomerError')); return }
+      if (totalPrice <= 0) { toast.error(t('orders.totalPriceError')); return }
+      const customerName = customers.find(c => c.id === customerId)
+      const label = customerName ? `${customerName.firstName} ${customerName.lastName}` : orderNumber
+      items.push({ data: buildOrderData(), label })
+    }
+    if (items.length === 0) { toast.error('No orders in queue'); return }
+
+    setIsBatchProcessing(true)
+    const fullOrders: any[] = []
+
+    for (let i = 0; i < items.length; i++) {
+      toast.loading(`Creating order ${i + 1}/${items.length}...`, { id: 'batch' })
+      const result = await window.electronAPI.createOrder(items[i].data)
+      if (result.error) {
+        toast.error(`Failed to create order ${items[i].label}: ${result.error}`)
+        continue
+      }
+      if (result.data?.id) {
+        const full = await window.electronAPI.getOrder(result.data.id)
+        if (full.data) fullOrders.push(full.data)
+      }
+    }
+
+    toast.dismiss('batch')
+
+    if (fullOrders.length > 0) {
+      toast.success(`${fullOrders.length} orders created!`)
+      setCreatedOrders(fullOrders)
+      setOrderQueue([])
+      // Wait for React to render the hidden multi-slip content
+      await new Promise(r => setTimeout(r, 200))
+      await window.electronAPI.printSlip()
+      setCreatedOrders([])
+    }
+
+    setIsBatchProcessing(false)
+    navigate('/orders')
+  }
+
   const handleSubmit = () => {
     if (!customerId) { toast.error(t('orders.selectCustomerError')); return }
     if (totalPrice <= 0) { toast.error(t('orders.totalPriceError')); return }
@@ -935,43 +1062,7 @@ export default function CreateOrderPage() {
     setIsSubmitting(true)
 
     try {
-      const lensTypeId = vlRightLensId || vlLeftLensId || vpRightLensId || vpLeftLensId || undefined
-
-      const orderData: any = {
-        orderNumber,
-        customerId,
-        userId: user!.id,
-        prescriptionId: prescriptionId || undefined,
-        frameId: selectedFrames.length > 0 ? selectedFrames[0].id : undefined,
-        lensTypeId,
-        vlRightEyeLensTypeId: vlRightLensId || undefined,
-        vlLeftEyeLensTypeId: vlLeftLensId || undefined,
-        vpRightEyeLensTypeId: vpRightLensId || undefined,
-        vpLeftEyeLensTypeId: vpLeftLensId || undefined,
-        vlRightEyeLensQuantity: vlRightQty,
-        vlLeftEyeLensQuantity: vlLeftQty,
-        vpRightEyeLensQuantity: vpRightQty,
-        vpLeftEyeLensQuantity: vpLeftQty,
-        framePrice: framesTotal,
-        vlRightEyeLensPrice: vlRightLensPrice * vlRightQty,
-        vlLeftEyeLensPrice: vlLeftLensPrice * vlLeftQty,
-        vpRightEyeLensPrice: vpRightLensPrice * vpRightQty,
-        vpLeftEyeLensPrice: vpLeftLensPrice * vpLeftQty,
-        basePrice: framesTotal + lensTotal,
-        addonsPrice: servicesTotal + contactLensTotal,
-        totalPrice,
-        depositAmount,
-        balanceDue,
-        status: 'in_progress',
-        expectedCompletionDate: readyDate ? new Date(readyDate).toISOString() : new Date().toISOString(),
-        createdAt: orderDate ? new Date(orderDate).toISOString() : new Date().toISOString(),
-        customerNotes: notes,
-        technicalNotes: [
-          ...(selectedContactLenses.length > 0 ? [`Contact Lenses: ${selectedContactLenses.map(cl => `${cl.brand}${cl.model ? ' ' + cl.model : ''} x${cl.qty}: ${cl.price * cl.qty} DA`).join(', ')}`] : []),
-          ...(services.length > 0 ? [`Additional Services: ${services.map(s => `${s.name}: ${s.price} DA`).join(', ')}`] : []),
-        ].join(' | '),
-      }
-
+      const orderData = buildOrderData()
       const result = await window.electronAPI.createOrder(orderData)
       if (result.error) {
         toast.error(result.error)
@@ -1731,15 +1822,48 @@ export default function CreateOrderPage() {
 
               {/* Action Buttons */}
               <div className="mt-6 space-y-2">
-                {/* Create & Print */}
-                <button type="button" onClick={handleSubmit} disabled={isSubmitting || !customerId}
+                {/* Queue indicator */}
+                {orderQueue.length > 0 && (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                        <ListPlus className="h-4 w-4" /> {orderQueue.length} order{orderQueue.length > 1 ? 's' : ''} in queue
+                      </span>
+                      <button onClick={() => setOrderQueue([])} className="text-xs text-amber-600 hover:text-amber-800 dark:text-amber-400">Clear</button>
+                    </div>
+                    <div className="text-xs text-amber-600 dark:text-amber-400 space-y-0.5">
+                      {orderQueue.map((q, i) => (
+                        <div key={i} className="flex items-center justify-between">
+                          <span>{q.data.orderNumber} — {q.label}</span>
+                          <button onClick={() => setOrderQueue(prev => prev.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 ml-2"><X className="h-3 w-3" /></button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {/* Add to Queue */}
+                <button type="button" onClick={addToQueue} disabled={isSubmitting || isBatchProcessing || !customerId}
+                  className="w-full py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-medium rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                  <ListPlus className="h-4 w-4" />
+                  Add to Queue {orderQueue.length > 0 ? `(${orderQueue.length})` : ''}
+                </button>
+                {/* Create All & Print (queue + current) */}
+                {orderQueue.length > 0 && (
+                  <button type="button" onClick={() => processQueue(!!customerId && totalPrice > 0)} disabled={isBatchProcessing}
+                    className="w-full py-3 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2">
+                    <Printer className="h-4 w-4" />
+                    {isBatchProcessing ? 'Processing...' : `Create All & Print (${orderQueue.length + (customerId && totalPrice > 0 ? 1 : 0)})`}
+                  </button>
+                )}
+                {/* Create & Print (single) */}
+                <button type="button" onClick={handleSubmit} disabled={isSubmitting || isBatchProcessing || !customerId}
                   className="w-full py-3 px-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2">
                   <Printer className="h-4 w-4" />
                   {isSubmitting ? t('orders.creating') : t('orders.createAndPrint')}
                 </button>
                 {/* Create Only */}
                 <button type="button" onClick={() => { if (!customerId) { toast.error(t('orders.selectCustomerError')); return }; if (totalPrice <= 0) { toast.error(t('orders.totalPriceError')); return }; handleConfirmedSubmit(false) }}
-                  disabled={isSubmitting || !customerId}
+                  disabled={isSubmitting || isBatchProcessing || !customerId}
                   className="w-full py-2.5 px-4 bg-primary hover:bg-primary/90 text-primary-foreground font-medium rounded-lg text-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   {isSubmitting ? t('orders.creating') : t('orders.createOrder')}
                 </button>
@@ -1812,10 +1936,21 @@ export default function CreateOrderPage() {
         </div>
       )}
 
-      {/* Hidden print content — only visible when printing */}
-      {createdOrder && (
+      {/* Hidden print content — single order */}
+      {createdOrder && createdOrders.length === 0 && (
         <div className="print-slip-content hidden print:block">
           <OrderSlip order={createdOrder} />
+        </div>
+      )}
+
+      {/* Hidden print content — batch orders (each on its own A5 page) */}
+      {createdOrders.length > 0 && (
+        <div className="print-slip-content hidden print:block">
+          {createdOrders.map((o, i) => (
+            <div key={o.id} style={{ pageBreakAfter: i < createdOrders.length - 1 ? 'always' : 'auto' }}>
+              <OrderSlip order={o} />
+            </div>
+          ))}
         </div>
       )}
 
