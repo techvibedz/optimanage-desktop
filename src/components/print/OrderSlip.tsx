@@ -56,23 +56,22 @@ export default function OrderSlip({ order }: OrderSlipProps) {
   const hasVL = order.prescription && order.prescription.hasVLData !== false
   const hasVP = order.prescription && order.prescription.hasVPData !== false
   const hasBoth = hasVL && hasVP
+  const hasRx = !!order.prescription
   const hasNotes = !!(order.technicalNotes || order.notes)
 
-  // Count content sections to determine density
-  const sectionCount = [
-    !!order.prescription,
-    !!hasLens,
-    !!hasNotes,
-  ].filter(Boolean).length
+  // 3-tier sizing: compact (VL+VP) → normal (has prescription) → relaxed (no prescription)
+  const compact = hasBoth
+  const normal = !compact && hasRx
+  const relaxed = !compact && !normal
 
-  // Dense when content is heavy: both VL+VP, or prescription + lens + notes
-  const dense = hasBoth || sectionCount >= 3
+  // Font/padding helpers based on tier
+  const fs = (c: string, n: string, r: string) => compact ? c : normal ? n : r
 
   // ── Shared styles ──
   const F: React.CSSProperties = { fontFamily: "'Segoe UI', Arial, sans-serif", color: '#000', boxSizing: 'border-box' }
-  const cellPad = dense ? '0.5mm 1.2mm' : '1.2mm 2mm'
-  const cell: React.CSSProperties = { border: '1px solid #000', padding: cellPad, textAlign: 'center', fontSize: dense ? '8pt' : '10pt', fontWeight: 700, lineHeight: '1.2' }
-  const hCell: React.CSSProperties = { ...cell, fontWeight: 800, fontSize: dense ? '7pt' : '8.5pt', borderBottom: '2px solid #000' }
+  const cellPad = fs('0.5mm 1mm', '0.8mm 1.5mm', '1.2mm 2mm')
+  const cell: React.CSSProperties = { border: '1px solid #000', padding: cellPad, textAlign: 'center', fontSize: fs('7.5pt', '8.5pt', '10pt'), fontWeight: 700, lineHeight: '1.2' }
+  const hCell: React.CSSProperties = { ...cell, fontWeight: 800, fontSize: fs('6.5pt', '7.5pt', '8.5pt'), borderBottom: '2px solid #000' }
 
   // ── Header row content ──
   const HeaderContent = ({ label }: { label: string }) => (
@@ -80,17 +79,17 @@ export default function OrderSlip({ order }: OrderSlipProps) {
       <tbody>
         <tr>
           <td style={{ verticalAlign: 'middle', width: settings.logoUrl ? '12mm' : '0' }}>
-            {settings.logoUrl && <img src={settings.logoUrl} alt="" style={{ width: dense ? '9mm' : '11mm', height: dense ? '9mm' : '11mm', objectFit: 'contain' }} />}
+            {settings.logoUrl && <img src={settings.logoUrl} alt="" style={{ width: fs('9mm', '10mm', '11mm'), height: fs('9mm', '10mm', '11mm'), objectFit: 'contain' }} />}
           </td>
           <td style={{ verticalAlign: 'middle', paddingLeft: '2mm' }}>
-            <div style={{ fontSize: dense ? '10pt' : '11pt', fontWeight: 800, lineHeight: '1.2' }}>{settings.opticianName || 'OptiManage'}</div>
-            {settings.opticianAddress && <div style={{ fontSize: dense ? '6pt' : '7pt', color: '#444', lineHeight: '1.1', maxWidth: '50mm', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{settings.opticianAddress}</div>}
-            {settings.opticianPhone && <div style={{ fontSize: dense ? '6.5pt' : '7.5pt', color: '#444' }}>{settings.opticianPhone}</div>}
+            <div style={{ fontSize: fs('9.5pt', '10pt', '11pt'), fontWeight: 800, lineHeight: '1.2' }}>{settings.opticianName || 'OptiManage'}</div>
+            {settings.opticianAddress && <div style={{ fontSize: fs('5.5pt', '6.5pt', '7pt'), color: '#444', lineHeight: '1.1', maxWidth: '50mm', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{settings.opticianAddress}</div>}
+            {settings.opticianPhone && <div style={{ fontSize: fs('6pt', '6.5pt', '7.5pt'), color: '#444' }}>{settings.opticianPhone}</div>}
           </td>
           <td style={{ verticalAlign: 'top', textAlign: 'right', whiteSpace: 'nowrap' }}>
-            <div style={{ fontSize: dense ? '7pt' : '8pt', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '0.5mm' }}>{label}</div>
-            <div style={{ fontSize: dense ? '13pt' : '15pt', fontWeight: 900, lineHeight: '1' }}>{order.orderNumber}</div>
-            <div style={{ fontSize: dense ? '6.5pt' : '7.5pt', color: '#555', marginTop: '0.5mm' }}>{fmtDate(order.createdAt)}</div>
+            <div style={{ fontSize: fs('6.5pt', '7pt', '8pt'), fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '0.5mm' }}>{label}</div>
+            <div style={{ fontSize: fs('12pt', '13pt', '15pt'), fontWeight: 900, lineHeight: '1' }}>{order.orderNumber}</div>
+            <div style={{ fontSize: fs('6pt', '6.5pt', '7.5pt'), color: '#555', marginTop: '0.5mm' }}>{fmtDate(order.createdAt)}</div>
           </td>
         </tr>
       </tbody>
@@ -102,20 +101,20 @@ export default function OrderSlip({ order }: OrderSlipProps) {
     <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid #000' }}>
       <tbody>
         <tr>
-          <td style={{ padding: dense ? '1mm 2mm' : '1.5mm 2.5mm', verticalAlign: 'top', width: '50%', borderRight: '1px solid #000' }}>
-            <div style={{ fontSize: dense ? '6pt' : '7pt', fontWeight: 700, textTransform: 'uppercase', color: '#666', letterSpacing: '0.3px' }}>Client</div>
-            <div style={{ fontSize: dense ? '9pt' : '10pt', fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '60mm' }}>{name}</div>
-            {order.customer?.phone && <div style={{ fontSize: dense ? '7pt' : '8pt', color: '#333' }}>{order.customer.phone}</div>}
+          <td style={{ padding: fs('0.8mm 1.5mm', '1mm 2mm', '1.5mm 2.5mm'), verticalAlign: 'top', width: '50%', borderRight: '1px solid #000' }}>
+            <div style={{ fontSize: fs('5.5pt', '6pt', '7pt'), fontWeight: 700, textTransform: 'uppercase', color: '#666', letterSpacing: '0.3px' }}>Client</div>
+            <div style={{ fontSize: fs('8pt', '9pt', '10pt'), fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '60mm' }}>{name}</div>
+            {order.customer?.phone && <div style={{ fontSize: fs('6.5pt', '7pt', '8pt'), color: '#333' }}>{order.customer.phone}</div>}
           </td>
-          <td style={{ padding: dense ? '1mm 2mm' : '1.5mm 2.5mm', verticalAlign: 'top', width: '50%' }}>
+          <td style={{ padding: fs('0.8mm 1.5mm', '1mm 2mm', '1.5mm 2.5mm'), verticalAlign: 'top', width: '50%' }}>
             {order.frame ? (
               <>
-                <div style={{ fontSize: dense ? '6pt' : '7pt', fontWeight: 700, textTransform: 'uppercase', color: '#666', letterSpacing: '0.3px' }}>Monture</div>
-                <div style={{ fontSize: dense ? '8pt' : '9.5pt', fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '60mm' }}>{order.frame.brand} {order.frame.model}</div>
-                <div style={{ fontSize: dense ? '6.5pt' : '7.5pt', color: '#555' }}>{order.frame.color}{order.frame.size ? ` - ${order.frame.size}` : ''}</div>
+                <div style={{ fontSize: fs('5.5pt', '6pt', '7pt'), fontWeight: 700, textTransform: 'uppercase', color: '#666', letterSpacing: '0.3px' }}>Monture</div>
+                <div style={{ fontSize: fs('7.5pt', '8.5pt', '9.5pt'), fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '60mm' }}>{order.frame.brand} {order.frame.model}</div>
+                <div style={{ fontSize: fs('6pt', '6.5pt', '7.5pt'), color: '#555' }}>{order.frame.color}{order.frame.size ? ` - ${order.frame.size}` : ''}</div>
               </>
             ) : (
-              <div style={{ fontSize: dense ? '7pt' : '8pt', color: '#999' }}>Pas de monture</div>
+              <div style={{ fontSize: fs('6.5pt', '7pt', '8pt'), color: '#999' }}>Pas de monture</div>
             )}
           </td>
         </tr>
@@ -188,7 +187,7 @@ export default function OrderSlip({ order }: OrderSlipProps) {
   // ── Lens types table content ──
   const LensContent = () => {
     if (!hasLens) return null
-    const lensFs = dense ? '8pt' : '9.5pt'
+    const lensFs = fs('7.5pt', '8.5pt', '9.5pt')
     return (
       <table style={{ width: '100%', borderCollapse: 'collapse', border: '1px solid #000' }}>
         <thead>
@@ -223,11 +222,11 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
   // ── Payment summary ──
   const PaymentBlock = ({ large }: { large: boolean }) => {
-    const s1 = large ? '10pt' : dense ? '8pt' : '9.5pt'
-    const s2 = large ? '11pt' : dense ? '9pt' : '10pt'
-    const s3 = large ? '12pt' : dense ? '10pt' : '11pt'
-    const cellP = dense ? '1mm 2mm' : '1.5mm 3mm'
-    const resteP = dense ? '1.5mm 2mm' : '2mm 3mm'
+    const s1 = large ? '10pt' : fs('7.5pt', '8.5pt', '9.5pt')
+    const s2 = large ? '11pt' : fs('8pt', '9pt', '10pt')
+    const s3 = large ? '12pt' : fs('9pt', '10pt', '11pt')
+    const cellP = fs('0.8mm 1.5mm', '1mm 2mm', '1.5mm 3mm')
+    const resteP = fs('1mm 1.5mm', '1.5mm 2mm', '2mm 3mm')
     return (
       <table style={{ width: '100%', borderCollapse: 'collapse', border: '2px solid #000' }}>
         <tbody>
@@ -251,13 +250,13 @@ export default function OrderSlip({ order }: OrderSlipProps) {
   // ── Footer content ──
   const FooterContent = ({ large }: { large: boolean }) => (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '3mm' }}>
-      <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: dense ? '1mm' : '1.5mm' }}>
+      <div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: fs('0.8mm', '1mm', '1.5mm') }}>
         {order.expectedCompletionDate && (
-          <div style={{ fontSize: large ? '9pt' : dense ? '7.5pt' : '8.5pt', fontWeight: 700, border: '1.5px solid #000', padding: dense ? '0.8mm 2mm' : '1.2mm 3mm', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: large ? '9pt' : fs('7pt', '7.5pt', '8.5pt'), fontWeight: 700, border: '1.5px solid #000', padding: fs('0.5mm 1.5mm', '0.8mm 2mm', '1.2mm 3mm'), whiteSpace: 'nowrap' }}>
             Prete: {fmtReady(order.expectedCompletionDate)}
           </div>
         )}
-        <div style={{ fontSize: large ? '10pt' : dense ? '8pt' : '9pt', fontWeight: 900, border: '2px solid #000', padding: dense ? '0.8mm 4mm' : '1.2mm 5mm', textAlign: 'center', letterSpacing: '0.5px' }}>
+        <div style={{ fontSize: large ? '10pt' : fs('7.5pt', '8pt', '9pt'), fontWeight: 900, border: '2px solid #000', padding: fs('0.5mm 3mm', '0.8mm 4mm', '1.2mm 5mm'), textAlign: 'center', letterSpacing: '0.5px' }}>
           {status}
         </div>
       </div>
@@ -268,14 +267,14 @@ export default function OrderSlip({ order }: OrderSlipProps) {
   )
 
   // ═══════ HALF-PAGE: flex column — content shrinks, footer stays ═══════
-  const gap = dense ? '1mm' : '1.5mm'
-  const px = dense ? '3mm' : '4mm'
+  const gap = fs('0.5mm', '1mm', '1.5mm')
+  const px = fs('2.5mm', '3mm', '4mm')
   const HalfPage = ({ label, showPrescription, showReadyDate, largeFooter }: {
     label: string; showPrescription: boolean; showReadyDate: boolean; largeFooter: boolean
   }) => (
     <div style={{ ...F, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Content area — can shrink if needed */}
-      <div style={{ flex: '1 1 auto', minHeight: 0, overflow: 'hidden', padding: `${dense ? '1.5mm' : '2.5mm'} ${px} 0` }}>
+      <div style={{ flex: '1 1 auto', minHeight: 0, overflow: 'hidden', padding: `${fs('1.5mm', '2mm', '2.5mm')} ${px} 0` }}>
         <HeaderContent label={label} />
         <div style={{ borderBottom: '2px solid #000', margin: `${gap} 0` }} />
         <InfoContent />
@@ -289,28 +288,29 @@ export default function OrderSlip({ order }: OrderSlipProps) {
         )}
 
         {showPrescription && hasNotes && order.technicalNotes && (
-          <div style={{ marginTop: gap, fontSize: dense ? '7pt' : '7.5pt', border: '1px solid #000', padding: '0.5mm 2mm', overflow: 'hidden', maxHeight: dense ? '6mm' : '8mm', lineHeight: '1.2' }}>
+          <div style={{ marginTop: gap, fontSize: fs('6.5pt', '7pt', '7.5pt'), border: '1px solid #000', padding: '0.5mm 2mm', overflow: 'hidden', maxHeight: fs('5mm', '6mm', '8mm'), lineHeight: '1.2' }}>
             <strong>Notes:</strong> {order.technicalNotes}
           </div>
         )}
 
         {showReadyDate && order.expectedCompletionDate && (
-          <div style={{ marginTop: gap, textAlign: 'center', border: '2px solid #000', padding: dense ? '1mm 2mm' : '2mm 3mm', fontSize: dense ? '8pt' : '9.5pt', fontWeight: 800 }}>
+          <div style={{ marginTop: gap, textAlign: 'center', border: '2px solid #000', padding: fs('0.8mm 1.5mm', '1.5mm 2mm', '2mm 3mm'), fontSize: fs('7.5pt', '8.5pt', '9.5pt'), fontWeight: 800 }}>
             Date de retrait: {fmtReady(order.expectedCompletionDate)}
           </div>
         )}
       </div>
 
       {/* Footer — never clipped */}
-      <div style={{ flexShrink: 0, padding: `${gap} ${px} ${dense ? '1.5mm' : '2.5mm'}` }}>
+      <div style={{ flexShrink: 0, padding: `${gap} ${px} ${fs('1.5mm', '2mm', '2.5mm')}` }}>
         <FooterContent large={largeFooter} />
       </div>
     </div>
   )
 
   // ═══════ Full A5 Layout ═══════
-  const atelierPct = hasBoth ? '57%' : '50%'
-  const clientPct = hasBoth ? '41%' : '48%'
+  // Atelier needs more space when it has prescription
+  const atelierPct = compact ? '57%' : hasRx ? '53%' : '50%'
+  const clientPct = compact ? '41%' : hasRx ? '45%' : '48%'
   return (
     <div style={{ width: '148mm', height: '210mm', margin: '0 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ height: atelierPct, overflow: 'hidden' }}>
@@ -324,7 +324,7 @@ export default function OrderSlip({ order }: OrderSlipProps) {
       </div>
 
       <div style={{ height: clientPct, overflow: 'hidden' }}>
-        <HalfPage label="BON CLIENT" showPrescription={false} showReadyDate={true} largeFooter={!dense} />
+        <HalfPage label="BON CLIENT" showPrescription={false} showReadyDate={true} largeFooter={relaxed} />
       </div>
     </div>
   )

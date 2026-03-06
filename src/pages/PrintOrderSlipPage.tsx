@@ -89,7 +89,7 @@ export default function PrintOrderSlipPage() {
         {/* Scrollable preview */}
         <div className="slip-scroll no-print">
           <div style={{ display: 'flex', justifyContent: 'center', padding: '32px 16px 64px' }}>
-            <div style={{ width: '148mm', minHeight: '210mm', background: 'white', boxShadow: '0 4px 24px rgba(0,0,0,0.12)', borderRadius: '4px' }}>
+            <div style={{ width: '148mm', height: '210mm', background: 'white', boxShadow: '0 4px 24px rgba(0,0,0,0.12)', borderRadius: '4px', overflow: 'hidden' }}>
               <OrderSlip order={order} />
             </div>
           </div>
