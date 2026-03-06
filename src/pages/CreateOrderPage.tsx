@@ -443,6 +443,8 @@ export default function CreateOrderPage() {
   const [autoScanStatus, setAutoScanStatus] = useState<'idle' | 'scanning' | 'analyzing' | 'found'>('idle')
   const autoScanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const autoScanActiveRef = useRef(false)
+  const consecutiveDetectionsRef = useRef(0)
+  const REQUIRED_DETECTIONS = 4  // 4 consecutive detections at 600ms each = ~2.4s of stable document
 
   // Order queue for batch create & print
   const [orderQueue, setOrderQueue] = useState<any[]>([])
@@ -776,7 +778,7 @@ export default function CreateOrderPage() {
     const edgeDensity = edgeCount / totalPixels
 
     // A blank wall/hand has ~2-5% edges. A document with text has ~12-30%+
-    return edgeDensity > 0.08
+    return edgeDensity > 0.12
   }
 
   const stopAutoScan = () => {
@@ -789,11 +791,12 @@ export default function CreateOrderPage() {
 
   const startAutoScan = () => {
     autoScanActiveRef.current = true
+    consecutiveDetectionsRef.current = 0
     setAutoScanStatus('scanning')
     runDetectionLoop()
   }
 
-  // Fast detection loop — checks for document every 500ms, only calls AI when found
+  // Stable detection loop — requires multiple consecutive detections before capturing
   const runDetectionLoop = () => {
     if (!autoScanActiveRef.current) return
     autoScanTimerRef.current = setTimeout(async () => {
@@ -803,13 +806,25 @@ export default function CreateOrderPage() {
       const hasDocument = detectDocumentInFrame()
 
       if (!hasDocument) {
-        // Nothing visible — keep checking fast
+        // Nothing visible — reset counter and keep scanning
+        consecutiveDetectionsRef.current = 0
         setAutoScanStatus('scanning')
         runDetectionLoop()
         return
       }
 
-      // Phase 2: Document detected! Capture full-res, close camera immediately, then analyze
+      // Document detected — increment consecutive counter
+      consecutiveDetectionsRef.current++
+
+      if (consecutiveDetectionsRef.current < REQUIRED_DETECTIONS) {
+        // Not stable yet — keep checking (show progress to user)
+        setAutoScanStatus('scanning')
+        runDetectionLoop()
+        return
+      }
+
+      // Phase 2: Stable document confirmed! Capture full-res and analyze
+      consecutiveDetectionsRef.current = 0
       const video = cameraVideoRef.current
       const canvas = cameraCanvasRef.current
       if (!video || !canvas) { runDetectionLoop(); return }
@@ -820,11 +835,9 @@ export default function CreateOrderPage() {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
       const base64 = canvas.toDataURL('image/jpeg', 0.92)
 
-      // Close camera right away — user can put the prescription down
+      // Keep camera open — show analyzing status
+      setAutoScanStatus('analyzing')
       stopAutoScan()
-      closeCameraModal()
-      setIsScanning(true)
-      toast.info('Image capturée — analyse en cours...', { duration: 5000 })
 
       try {
         const res = await window.electronAPI.scanOrdonnance(base64)
@@ -835,6 +848,8 @@ export default function CreateOrderPage() {
           const hasVP = !!(d.vpRightEyeSphere || d.vpLeftEyeSphere || d.vpRightEyeCylinder || d.vpLeftEyeCylinder || d.vpRightEyeAddition || d.vpLeftEyeAddition)
 
           if (hasVL || hasVP) {
+            // Success! Fill form and close camera
+            setAutoScanStatus('found')
             setShowNewRxForm(true)
             setNewRxHasVL(hasVL)
             setNewRxHasVP(hasVP)
@@ -860,18 +875,23 @@ export default function CreateOrderPage() {
             toast.success('Ordonnance détectée automatiquement !', {
               description: `${hasVL ? 'VL' : ''}${hasVL && hasVP ? ' + ' : ''}${hasVP ? 'VP' : ''} détectés. Vérifiez les valeurs.`,
             })
-            setIsScanning(false)
+            // Close camera after brief visual feedback
+            setTimeout(() => closeCameraModal(), 800)
             return
           }
         }
-        // AI didn't find prescription — let user know
-        toast.warning('Document détecté mais pas d\'ordonnance. Réessayez.')
-        setIsScanning(false)
+        // AI didn't find prescription — resume scanning, don't close camera
+        toast.warning('Pas d\'ordonnance détectée — repositionnez le document.')
+        autoScanActiveRef.current = true
+        setAutoScanStatus('scanning')
+        runDetectionLoop()
       } catch {
         toast.error('Erreur lors de l\'analyse. Réessayez.')
-        setIsScanning(false)
+        autoScanActiveRef.current = true
+        setAutoScanStatus('scanning')
+        runDetectionLoop()
       }
-    }, 500)
+    }, 600)
   }
 
   const openCameraModal = async () => {
