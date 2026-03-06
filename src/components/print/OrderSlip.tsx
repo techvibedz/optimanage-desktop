@@ -60,17 +60,13 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
   // Count content sections to determine density
   const sectionCount = [
-    true, // header always
-    true, // info row always
     !!order.prescription,
     !!hasLens,
     !!hasNotes,
-    true, // footer always
   ].filter(Boolean).length
 
-  // Dense = many sections. Use compact sizing only when truly packed.
-  const dense = sectionCount >= 6 && hasBoth
-  const pad = dense ? '1.5mm 3mm' : '3mm 4mm'
+  // Dense when content is heavy: both VL+VP, or prescription + lens + notes
+  const dense = hasBoth || sectionCount >= 3
 
   // ── Shared styles ──
   const F: React.CSSProperties = { fontFamily: "'Segoe UI', Arial, sans-serif", color: '#000', boxSizing: 'border-box' }
@@ -271,50 +267,45 @@ export default function OrderSlip({ order }: OrderSlipProps) {
     </div>
   )
 
-  // ═══════ HALF-PAGE using a single table that fills 100% height ═══════
-  // Each section is a <tr> in a table with height:100%. The table distributes
-  // extra vertical space across all rows proportionally — no empty gaps.
+  // ═══════ HALF-PAGE: flex column — content shrinks, footer stays ═══════
+  const gap = dense ? '1mm' : '1.5mm'
+  const px = dense ? '3mm' : '4mm'
   const HalfPage = ({ label, showPrescription, showReadyDate, largeFooter }: {
     label: string; showPrescription: boolean; showReadyDate: boolean; largeFooter: boolean
   }) => (
-    <table style={{ ...F, width: '100%', height: '100%', borderCollapse: 'collapse', padding: 0 }}>
-      <tbody>
-        {/* Header */}
-        <tr><td style={{ padding: `${dense ? '1.5mm' : '3mm'} ${dense ? '3mm' : '4mm'} 0` }}><HeaderContent label={label} /></td></tr>
-        {/* Separator */}
-        <tr><td style={{ padding: `0 ${dense ? '3mm' : '4mm'}` }}><div style={{ borderBottom: '2px solid #000', margin: `${dense ? '0.5mm' : '1mm'} 0` }} /></td></tr>
-        {/* Client + Frame info */}
-        <tr><td style={{ padding: `0 ${dense ? '3mm' : '4mm'}` }}><InfoContent /></td></tr>
-        {/* Prescription (atelier only) */}
+    <div style={{ ...F, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Content area — can shrink if needed */}
+      <div style={{ flex: '1 1 auto', minHeight: 0, overflow: 'hidden', padding: `${dense ? '1.5mm' : '2.5mm'} ${px} 0` }}>
+        <HeaderContent label={label} />
+        <div style={{ borderBottom: '2px solid #000', margin: `${gap} 0` }} />
+        <InfoContent />
+
         {showPrescription && order.prescription && (
-          <tr><td style={{ padding: `${dense ? '1mm' : '1.5mm'} ${dense ? '3mm' : '4mm'} 0` }}><PrescriptionContent /></td></tr>
+          <div style={{ marginTop: gap }}><PrescriptionContent /></div>
         )}
-        {/* Lens types */}
+
         {hasLens && (
-          <tr><td style={{ padding: `${dense ? '1mm' : '1.5mm'} ${dense ? '3mm' : '4mm'} 0` }}><LensContent /></td></tr>
+          <div style={{ marginTop: gap }}><LensContent /></div>
         )}
-        {/* Notes (atelier only) */}
+
         {showPrescription && hasNotes && order.technicalNotes && (
-          <tr><td style={{ padding: `${dense ? '0.5mm' : '1mm'} ${dense ? '3mm' : '4mm'} 0` }}>
-            <div style={{ fontSize: dense ? '7pt' : '7.5pt', border: '1px solid #000', padding: '0.5mm 2mm', overflow: 'hidden', maxHeight: dense ? '6mm' : '8mm', lineHeight: '1.2' }}>
-              <strong>Notes:</strong> {order.technicalNotes}
-            </div>
-          </td></tr>
+          <div style={{ marginTop: gap, fontSize: dense ? '7pt' : '7.5pt', border: '1px solid #000', padding: '0.5mm 2mm', overflow: 'hidden', maxHeight: dense ? '6mm' : '8mm', lineHeight: '1.2' }}>
+            <strong>Notes:</strong> {order.technicalNotes}
+          </div>
         )}
-        {/* Ready date (client only) */}
+
         {showReadyDate && order.expectedCompletionDate && (
-          <tr><td style={{ padding: `${dense ? '1mm' : '1.5mm'} ${dense ? '3mm' : '4mm'} 0` }}>
-            <div style={{ textAlign: 'center', border: '2px solid #000', padding: dense ? '1mm 2mm' : '2mm 3mm', fontSize: dense ? '8pt' : '9.5pt', fontWeight: 800 }}>
-              Date de retrait: {fmtReady(order.expectedCompletionDate)}
-            </div>
-          </td></tr>
+          <div style={{ marginTop: gap, textAlign: 'center', border: '2px solid #000', padding: dense ? '1mm 2mm' : '2mm 3mm', fontSize: dense ? '8pt' : '9.5pt', fontWeight: 800 }}>
+            Date de retrait: {fmtReady(order.expectedCompletionDate)}
+          </div>
         )}
-        {/* Spacer row — absorbs remaining height */}
-        <tr><td style={{ height: '100%' }}></td></tr>
-        {/* Footer */}
-        <tr><td style={{ padding: `0 ${dense ? '3mm' : '4mm'} ${dense ? '1.5mm' : '3mm'}`, verticalAlign: 'bottom' }}><FooterContent large={largeFooter} /></td></tr>
-      </tbody>
-    </table>
+      </div>
+
+      {/* Footer — never clipped */}
+      <div style={{ flexShrink: 0, padding: `${gap} ${px} ${dense ? '1.5mm' : '2.5mm'}` }}>
+        <FooterContent large={largeFooter} />
+      </div>
+    </div>
   )
 
   // ═══════ Full A5 Layout ═══════
