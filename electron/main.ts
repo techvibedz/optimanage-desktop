@@ -1048,8 +1048,8 @@ function registerIpcHandlers() {
 function registerAiHandlers() {
   const GEMINI_API_KEY = 'AIzaSyDTtRKUy3tXkKhuR7mXYEAigAPhtLmszi0'
   const GEMINI_MODELS = [
-    'gemini-2.0-flash-lite',
     'gemini-2.5-flash-lite',
+    'gemini-2.0-flash-lite',
     'gemini-2.0-flash',
   ]
 
@@ -1151,12 +1151,11 @@ You MUST respond with ONLY a valid JSON object, no markdown, no explanation, no 
       // Try each Gemini model with retry on 429
       let lastError = ''
       for (const model of GEMINI_MODELS) {
-        for (let attempt = 0; attempt < 3; attempt++) {
+        for (let attempt = 0; attempt < 2; attempt++) {
           try {
             if (attempt > 0) {
-              const wait = attempt * 5000
-              console.log(`AI scan: retry ${attempt} for ${model} (waiting ${wait / 1000}s)...`)
-              await new Promise(r => setTimeout(r, wait))
+              console.log(`AI scan: retry for ${model} (waiting 2s)...`)
+              await new Promise(r => setTimeout(r, 2000))
             }
             console.log(`AI scan: trying ${model}...`)
             const responseText = await callGemini(model, base64Data, mimeType)
