@@ -345,15 +345,23 @@ export default function OrderDetailsPage() {
       `}</style>
       {/* Print overlay */}
       {showPrintSlip && (
-        <div className="fixed inset-0 z-[9999] bg-white print:bg-white">
-          <div className="no-print flex items-center justify-between p-4 border-b">
-            <span className="text-sm font-medium">Print Preview</span>
-            <div className="flex gap-2">
+        <div className="fixed inset-0 z-[9999] bg-white print:bg-white" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+          <div className="no-print" style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 24px', borderBottom: '1px solid #e5e7eb' }}>
+            <span style={{ fontSize: '14px', fontWeight: 600 }}>Print Preview</span>
+            <div style={{ display: 'flex', gap: '8px' }}>
               <button onClick={() => window.electronAPI.printSlip()} className="px-4 py-2 bg-primary text-white rounded-lg text-sm">Print</button>
               <button onClick={() => setShowPrintSlip(false)} className="px-4 py-2 border border-border rounded-lg text-sm">Close</button>
             </div>
           </div>
-          <div className="print-slip-content p-4 print:p-0">
+          <div className="no-print" style={{ flex: 1, overflowY: 'auto', background: '#f3f4f6' }}>
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '32px 16px 64px' }}>
+              <div style={{ width: '148mm', height: '210mm', background: 'white', boxShadow: '0 4px 24px rgba(0,0,0,0.12)', borderRadius: '4px', overflow: 'hidden' }}>
+                <OrderSlip order={order} />
+              </div>
+            </div>
+          </div>
+          {/* Hidden print target */}
+          <div className="print-slip-content" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm' }}>
             <OrderSlip order={order} />
           </div>
         </div>
