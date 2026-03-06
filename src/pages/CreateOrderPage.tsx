@@ -984,7 +984,7 @@ export default function CreateOrderPage() {
       setShowConfirmation(false)
 
       if (printAfter && result.data?.id) {
-        navigate(`/orders/${result.data.id}/slip`)
+        navigate(`/orders/${result.data.id}/print`)
       } else {
         navigate('/orders')
       }
