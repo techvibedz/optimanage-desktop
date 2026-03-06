@@ -984,14 +984,7 @@ export default function CreateOrderPage() {
       setShowConfirmation(false)
 
       if (printAfter && result.data?.id) {
-        // Fetch full order with relations for the print slip
-        const fullOrder = await window.electronAPI.getOrder(result.data.id)
-        if (fullOrder.data) {
-          setCreatedOrder(fullOrder.data)
-          setShowPrintDialog(true)
-        } else {
-          navigate('/orders')
-        }
+        navigate(`/orders/${result.data.id}/slip`)
       } else {
         navigate('/orders')
       }
