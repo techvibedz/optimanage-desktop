@@ -984,7 +984,15 @@ export default function CreateOrderPage() {
       setShowConfirmation(false)
 
       if (printAfter && result.data?.id) {
-        navigate(`/orders/${result.data.id}/print`)
+        // Fetch full order with relations, render hidden slip, print immediately
+        const fullOrder = await window.electronAPI.getOrder(result.data.id)
+        if (fullOrder.data) {
+          setCreatedOrder(fullOrder.data)
+          // Wait for React to render the hidden print-slip-content div
+          await new Promise(r => setTimeout(r, 100))
+          await window.electronAPI.printSlip()
+        }
+        navigate('/orders')
       } else {
         navigate('/orders')
       }
