@@ -1044,15 +1044,12 @@ function registerIpcHandlers() {
   })
 }
 
-// ── AI: Scan Ordonnance (OpenRouter + Gemini fallback) ───────────────────
+// ── AI: Scan Ordonnance (Google Gemini direct API) ──────────────────────
 function registerAiHandlers() {
-  const OPENROUTER_API_KEY = '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'
-  // Free vision models on OpenRouter (best first)
-  // Vision-capable models (cheapest first, openrouter/free auto-routes to free endpoints)
-  const OPENROUTER_MODELS = [
-    'openrouter/free',
-    'google/gemini-2.5-flash-lite',
-    'bytedance-seed/seed-1.6-flash',
+  const GEMINI_API_KEY = 'AIzaSyDTtRKUy3tXkKhuR7mXYEAigAPhtLmszi0'
+  const GEMINI_MODELS = [
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
   ]
 
   const systemPrompt = `You are an expert Algerian ophthalmology assistant specializing in reading optical prescriptions (ordonnances).
@@ -1094,34 +1091,29 @@ You MUST respond with ONLY a valid JSON object, no markdown, no explanation, no 
   "pupillaryDistance": string | null
 }`
 
-  // Helper: OpenRouter API call (OpenAI-compatible format)
-  async function callOpenRouter(model: string, base64Data: string, mimeType: string): Promise<string> {
+  // Helper: Google Gemini API call
+  async function callGemini(model: string, base64Data: string, mimeType: string): Promise<string> {
     const https = await import('node:https')
     const payload = {
-      model,
-      messages: [
-        {
-          role: 'user',
-          content: [
-            { type: 'text', text: systemPrompt },
-            { type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Data}` } }
-          ]
-        }
-      ],
-      temperature: 0.1,
-      max_tokens: 1024,
+      contents: [{
+        parts: [
+          { text: systemPrompt },
+          { inline_data: { mime_type: mimeType, data: base64Data } }
+        ]
+      }],
+      generationConfig: {
+        temperature: 0.1,
+        maxOutputTokens: 1024,
+      }
     }
     return new Promise((resolve, reject) => {
       const body = JSON.stringify(payload)
       const req = https.request({
-        hostname: 'openrouter.ai',
-        path: '/api/v1/chat/completions',
+        hostname: 'generativelanguage.googleapis.com',
+        path: `/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-          'HTTP-Referer': 'https://optimanage.app',
-          'X-Title': 'OptiManage Ordonnance Scanner',
           'Content-Length': Buffer.byteLength(body),
         },
         timeout: 90000,
@@ -1132,7 +1124,7 @@ You MUST respond with ONLY a valid JSON object, no markdown, no explanation, no 
           if (res.statusCode === 429) {
             reject(new Error('RATE_LIMITED'))
           } else if (res.statusCode && res.statusCode >= 400) {
-            reject(new Error(`OpenRouter error ${res.statusCode}: ${data.slice(0, 300)}`))
+            reject(new Error(`Gemini error ${res.statusCode}: ${data.slice(0, 300)}`))
           } else {
             resolve(data)
           }
@@ -1155,9 +1147,9 @@ You MUST respond with ONLY a valid JSON object, no markdown, no explanation, no 
       }
       const base64Data = imageBase64.replace(/^data:[^;]+;base64,/, '')
 
-      // Try each OpenRouter model with retry on 429
+      // Try each Gemini model with retry on 429
       let lastError = ''
-      for (const model of OPENROUTER_MODELS) {
+      for (const model of GEMINI_MODELS) {
         for (let attempt = 0; attempt < 2; attempt++) {
           try {
             if (attempt > 0) {
@@ -1165,9 +1157,9 @@ You MUST respond with ONLY a valid JSON object, no markdown, no explanation, no 
               await new Promise(r => setTimeout(r, 3000))
             }
             console.log(`AI scan: trying ${model}...`)
-            const responseText = await callOpenRouter(model, base64Data, mimeType)
+            const responseText = await callGemini(model, base64Data, mimeType)
             const response = JSON.parse(responseText)
-            const textContent = response?.choices?.[0]?.message?.content
+            const textContent = response?.candidates?.[0]?.content?.parts?.[0]?.text
             if (!textContent) { lastError = 'Empty AI response'; continue }
 
             let jsonStr = textContent.trim()
