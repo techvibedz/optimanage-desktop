@@ -339,7 +339,7 @@ export default function OrderSlip({ order }: OrderSlipProps) {
   // Atelier always gets more space (flex 3 ≈ 60%) since it has prescription + notes
   // Client gets less space (flex 2 ≈ 40%) — header, lenses, ready date, footer only
   return (
-    <div style={{ width: '148mm', height: '210mm', margin: '0 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ width: '148mm', height: '210mm', margin: '0 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden', paddingBottom: '3mm' }}>
       {/* Top half — BON ATELIER (bigger) */}
       <div style={{ flex: '3 1 0%', minHeight: 0, overflow: 'hidden' }}>
         <HalfPage label="BON ATELIER" showPrescription={true} showReadyDate={false} largeFooter={false} />

@@ -61,7 +61,7 @@ export default function PrintOrderSlipPage() {
           #root { visibility: hidden !important; height: 0 !important; overflow: hidden !important; }
           .print-slip-target, .print-slip-target * { visibility: visible !important; }
           .print-slip-target { position: fixed !important; left: 0 !important; top: 0 !important; width: 148mm !important; height: 210mm !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; z-index: 99999 !important; }
-          @page { size: A5 portrait; margin: 0mm 0mm 2mm 0mm; }
+          @page { size: A5 portrait; margin: 0mm 0mm 4mm 0mm; }
         }
       `}</style>
 
