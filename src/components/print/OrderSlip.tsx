@@ -311,23 +311,25 @@ export default function OrderSlip({ order }: OrderSlipProps) {
   )
 
   // ═══════ Full A5 Layout ═══════
+  // Atelier always gets more space (flex 3 ≈ 60%) since it has prescription + notes
+  // Client gets less space (flex 2 ≈ 40%) — header, lenses, ready date, footer only
   return (
     <div style={{ width: '148mm', height: '210mm', margin: '0 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Top half — BON ATELIER */}
-      <div style={{ flex: '1 1 50%', minHeight: 0, overflow: 'hidden' }}>
+      {/* Top half — BON ATELIER (bigger) */}
+      <div style={{ flex: '3 1 0%', minHeight: 0, overflow: 'hidden' }}>
         <HalfPage label="BON ATELIER" showPrescription={true} showReadyDate={false} largeFooter={false} />
       </div>
 
       {/* Separator — fixed thin line */}
-      <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', margin: '0 3mm', padding: '1mm 0' }}>
+      <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', margin: '0 3mm', padding: '0.5mm 0' }}>
         <div style={{ flex: 1, borderTop: '1.5px dashed #000' }} />
         <div style={{ padding: '0 2mm', fontSize: '6pt', fontWeight: 600, color: '#555', whiteSpace: 'nowrap' }}>DECOUPER ICI</div>
         <div style={{ flex: 1, borderTop: '1.5px dashed #000' }} />
       </div>
 
-      {/* Bottom half — BON CLIENT */}
-      <div style={{ flex: '1 1 50%', minHeight: 0, overflow: 'hidden' }}>
-        <HalfPage label="BON CLIENT" showPrescription={false} showReadyDate={true} largeFooter={relaxed} />
+      {/* Bottom half — BON CLIENT (smaller) */}
+      <div style={{ flex: '2 1 0%', minHeight: 0, overflow: 'hidden' }}>
+        <HalfPage label="BON CLIENT" showPrescription={false} showReadyDate={true} largeFooter={false} />
       </div>
     </div>
   )
