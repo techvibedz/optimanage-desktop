@@ -266,45 +266,38 @@ export default function OrderSlip({ order }: OrderSlipProps) {
     </div>
   )
 
-  // ═══════ HALF-PAGE: flex column, content top + footer bottom, fills half ═══════
+  // ═══════ HALF-PAGE: natural flow, no spacer, no gaps ═══════
   const gap = fs('0.5mm', '1mm', '1.5mm')
   const px = fs('2.5mm', '3mm', '4mm')
   const HalfPage = ({ label, showPrescription, showReadyDate, largeFooter }: {
     label: string; showPrescription: boolean; showReadyDate: boolean; largeFooter: boolean
   }) => (
-    <div style={{ ...F, height: '100%', display: 'flex', flexDirection: 'column', padding: `${fs('1.5mm', '2mm', '2.5mm')} ${px}` }}>
-      {/* Content — stays at top */}
-      <div style={{ flex: '0 0 auto' }}>
-        <HeaderContent label={label} />
-        <div style={{ borderBottom: '2px solid #000', margin: `${gap} 0` }} />
-        <InfoContent />
+    <div style={{ ...F, padding: `${fs('1.5mm', '2mm', '2.5mm')} ${px}` }}>
+      <HeaderContent label={label} />
+      <div style={{ borderBottom: '2px solid #000', margin: `${gap} 0` }} />
+      <InfoContent />
 
-        {showPrescription && order.prescription && (
-          <div style={{ marginTop: gap }}><PrescriptionContent /></div>
-        )}
+      {showPrescription && order.prescription && (
+        <div style={{ marginTop: gap }}><PrescriptionContent /></div>
+      )}
 
-        {hasLens && (
-          <div style={{ marginTop: gap }}><LensContent /></div>
-        )}
+      {hasLens && (
+        <div style={{ marginTop: gap }}><LensContent /></div>
+      )}
 
-        {showPrescription && hasNotes && order.technicalNotes && (
-          <div style={{ marginTop: gap, fontSize: fs('6.5pt', '7pt', '7.5pt'), border: '1px solid #000', padding: '0.5mm 2mm', overflow: 'hidden', maxHeight: fs('5mm', '6mm', '8mm'), lineHeight: '1.2' }}>
-            <strong>Notes:</strong> {order.technicalNotes}
-          </div>
-        )}
+      {showPrescription && hasNotes && order.technicalNotes && (
+        <div style={{ marginTop: gap, fontSize: fs('6.5pt', '7pt', '7.5pt'), border: '1px solid #000', padding: '0.5mm 2mm', overflow: 'hidden', maxHeight: fs('5mm', '6mm', '8mm'), lineHeight: '1.2' }}>
+          <strong>Notes:</strong> {order.technicalNotes}
+        </div>
+      )}
 
-        {showReadyDate && order.expectedCompletionDate && (
-          <div style={{ marginTop: gap, textAlign: 'center', border: '2px solid #000', padding: fs('0.8mm 1.5mm', '1.5mm 2mm', '2mm 3mm'), fontSize: fs('7.5pt', '8.5pt', '9.5pt'), fontWeight: 800 }}>
-            Date de retrait: {fmtReady(order.expectedCompletionDate)}
-          </div>
-        )}
-      </div>
+      {showReadyDate && order.expectedCompletionDate && (
+        <div style={{ marginTop: gap, textAlign: 'center', border: '2px solid #000', padding: fs('0.8mm 1.5mm', '1.5mm 2mm', '2mm 3mm'), fontSize: fs('7.5pt', '8.5pt', '9.5pt'), fontWeight: 800 }}>
+          Date de retrait: {fmtReady(order.expectedCompletionDate)}
+        </div>
+      )}
 
-      {/* Spacer — pushes footer to bottom */}
-      <div style={{ flex: '1 1 auto' }} />
-
-      {/* Footer — stays at bottom */}
-      <div style={{ flex: '0 0 auto' }}>
+      <div style={{ marginTop: gap }}>
         <FooterContent large={largeFooter} />
       </div>
     </div>
