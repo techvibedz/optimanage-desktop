@@ -266,38 +266,45 @@ export default function OrderSlip({ order }: OrderSlipProps) {
     </div>
   )
 
-  // ═══════ HALF-PAGE: no flex-grow — content + footer touch, no gaps ═══════
+  // ═══════ HALF-PAGE: flex column, content top + footer bottom, fills half ═══════
   const gap = fs('0.5mm', '1mm', '1.5mm')
   const px = fs('2.5mm', '3mm', '4mm')
   const HalfPage = ({ label, showPrescription, showReadyDate, largeFooter }: {
     label: string; showPrescription: boolean; showReadyDate: boolean; largeFooter: boolean
   }) => (
-    <div style={{ ...F, padding: `${fs('1.5mm', '2mm', '2.5mm')} ${px}` }}>
-      <HeaderContent label={label} />
-      <div style={{ borderBottom: '2px solid #000', margin: `${gap} 0` }} />
-      <InfoContent />
+    <div style={{ ...F, height: '100%', display: 'flex', flexDirection: 'column', padding: `${fs('1.5mm', '2mm', '2.5mm')} ${px}` }}>
+      {/* Content — stays at top */}
+      <div style={{ flex: '0 0 auto' }}>
+        <HeaderContent label={label} />
+        <div style={{ borderBottom: '2px solid #000', margin: `${gap} 0` }} />
+        <InfoContent />
 
-      {showPrescription && order.prescription && (
-        <div style={{ marginTop: gap }}><PrescriptionContent /></div>
-      )}
+        {showPrescription && order.prescription && (
+          <div style={{ marginTop: gap }}><PrescriptionContent /></div>
+        )}
 
-      {hasLens && (
-        <div style={{ marginTop: gap }}><LensContent /></div>
-      )}
+        {hasLens && (
+          <div style={{ marginTop: gap }}><LensContent /></div>
+        )}
 
-      {showPrescription && hasNotes && order.technicalNotes && (
-        <div style={{ marginTop: gap, fontSize: fs('6.5pt', '7pt', '7.5pt'), border: '1px solid #000', padding: '0.5mm 2mm', overflow: 'hidden', maxHeight: fs('5mm', '6mm', '8mm'), lineHeight: '1.2' }}>
-          <strong>Notes:</strong> {order.technicalNotes}
-        </div>
-      )}
+        {showPrescription && hasNotes && order.technicalNotes && (
+          <div style={{ marginTop: gap, fontSize: fs('6.5pt', '7pt', '7.5pt'), border: '1px solid #000', padding: '0.5mm 2mm', overflow: 'hidden', maxHeight: fs('5mm', '6mm', '8mm'), lineHeight: '1.2' }}>
+            <strong>Notes:</strong> {order.technicalNotes}
+          </div>
+        )}
 
-      {showReadyDate && order.expectedCompletionDate && (
-        <div style={{ marginTop: gap, textAlign: 'center', border: '2px solid #000', padding: fs('0.8mm 1.5mm', '1.5mm 2mm', '2mm 3mm'), fontSize: fs('7.5pt', '8.5pt', '9.5pt'), fontWeight: 800 }}>
-          Date de retrait: {fmtReady(order.expectedCompletionDate)}
-        </div>
-      )}
+        {showReadyDate && order.expectedCompletionDate && (
+          <div style={{ marginTop: gap, textAlign: 'center', border: '2px solid #000', padding: fs('0.8mm 1.5mm', '1.5mm 2mm', '2mm 3mm'), fontSize: fs('7.5pt', '8.5pt', '9.5pt'), fontWeight: 800 }}>
+            Date de retrait: {fmtReady(order.expectedCompletionDate)}
+          </div>
+        )}
+      </div>
 
-      <div style={{ marginTop: gap }}>
+      {/* Spacer — pushes footer to bottom */}
+      <div style={{ flex: '1 1 auto' }} />
+
+      {/* Footer — stays at bottom */}
+      <div style={{ flex: '0 0 auto' }}>
         <FooterContent large={largeFooter} />
       </div>
     </div>
@@ -305,18 +312,21 @@ export default function OrderSlip({ order }: OrderSlipProps) {
 
   // ═══════ Full A5 Layout ═══════
   return (
-    <div style={{ width: '148mm', height: '210mm', margin: '0 auto', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flex: '0 0 auto' }}>
+    <div style={{ width: '148mm', height: '210mm', margin: '0 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      {/* Top half — BON ATELIER */}
+      <div style={{ flex: '1 1 50%', minHeight: 0, overflow: 'hidden' }}>
         <HalfPage label="BON ATELIER" showPrescription={true} showReadyDate={false} largeFooter={false} />
       </div>
 
-      <div style={{ flex: '1 1 auto', display: 'flex', alignItems: 'center', margin: '0 3mm', minHeight: '3mm' }}>
+      {/* Separator — fixed thin line */}
+      <div style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', margin: '0 3mm', padding: '1mm 0' }}>
         <div style={{ flex: 1, borderTop: '1.5px dashed #000' }} />
         <div style={{ padding: '0 2mm', fontSize: '6pt', fontWeight: 600, color: '#555', whiteSpace: 'nowrap' }}>DECOUPER ICI</div>
         <div style={{ flex: 1, borderTop: '1.5px dashed #000' }} />
       </div>
 
-      <div style={{ flex: '0 0 auto' }}>
+      {/* Bottom half — BON CLIENT */}
+      <div style={{ flex: '1 1 50%', minHeight: 0, overflow: 'hidden' }}>
         <HalfPage label="BON CLIENT" showPrescription={false} showReadyDate={true} largeFooter={relaxed} />
       </div>
     </div>

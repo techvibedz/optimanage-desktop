@@ -360,12 +360,13 @@ export default function OrderDetailsPage() {
               </div>
             </div>
           </div>
-          {/* Hidden print target */}
-          <div className="print-slip-content" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm' }}>
-            <OrderSlip order={order} />
-          </div>
         </div>
       )}
+
+      {/* Hidden print target — always in DOM, outside overlay */}
+      <div className="print-slip-content" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm' }}>
+        <OrderSlip order={order} />
+      </div>
 
       <div className="space-y-6">
         {/* Header */}
