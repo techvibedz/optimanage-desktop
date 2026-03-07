@@ -1,6 +1,5 @@
 import { useSettings } from '@/lib/settings-context'
 import { useTranslation } from '@/lib/use-translation'
-import { useRef, useEffect, useState } from 'react'
 
 interface LensTypeInfo { name: string }
 
@@ -267,74 +266,43 @@ export default function OrderSlip({ order }: OrderSlipProps) {
     </div>
   )
 
-  // ═══════ HALF-PAGE: scales content to fill container ═══════
+  // ═══════ HALF-PAGE: pure flex, each section grows to fill space ═══════
   const gap = fs('0.5mm', '1mm', '1.5mm')
   const px = fs('2.5mm', '3mm', '4mm')
 
   const HalfPage = ({ label, showPrescription, showReadyDate, largeFooter }: {
     label: string; showPrescription: boolean; showReadyDate: boolean; largeFooter: boolean
-  }) => {
-    const containerRef = useRef<HTMLDivElement>(null)
-    const contentRef = useRef<HTMLDivElement>(null)
-    const [scale, setScale] = useState(1)
+  }) => (
+    <div style={{ ...F, height: '100%', display: 'flex', flexDirection: 'column', padding: `${fs('1.5mm', '2mm', '2.5mm')} ${px}` }}>
+      <div style={{ flex: '1 1 auto' }}><HeaderContent label={label} /></div>
+      <div style={{ borderBottom: '2px solid #000', margin: `${gap} 0` }} />
+      <div style={{ flex: '1 1 auto' }}><InfoContent /></div>
 
-    useEffect(() => {
-      const measure = () => {
-        if (containerRef.current && contentRef.current) {
-          const containerH = containerRef.current.offsetHeight
-          const contentH = contentRef.current.offsetHeight
-          if (contentH > 0 && containerH > contentH) {
-            setScale(containerH / contentH)
-          } else {
-            setScale(1)
-          }
-        }
-      }
-      measure()
-      // Re-measure after fonts load
-      const t = setTimeout(measure, 100)
-      return () => clearTimeout(t)
-    }, [order])
+      {showPrescription && order.prescription && (
+        <div style={{ flex: '2 1 auto', marginTop: gap }}><PrescriptionContent /></div>
+      )}
 
-    return (
-      <div ref={containerRef} style={{ ...F, height: '100%', overflow: 'hidden' }}>
-        <div ref={contentRef} style={{
-          padding: `${fs('1.5mm', '2mm', '2.5mm')} ${px}`,
-          transformOrigin: 'top left',
-          transform: `scale(${scale})`,
-          width: `${100 / scale}%`,
-        }}>
-          <HeaderContent label={label} />
-          <div style={{ borderBottom: '2px solid #000', margin: `${gap} 0` }} />
-          <InfoContent />
+      {hasLens && (
+        <div style={{ flex: '1 1 auto', marginTop: gap }}><LensContent /></div>
+      )}
 
-          {showPrescription && order.prescription && (
-            <div style={{ marginTop: gap }}><PrescriptionContent /></div>
-          )}
-
-          {hasLens && (
-            <div style={{ marginTop: gap }}><LensContent /></div>
-          )}
-
-          {showPrescription && hasNotes && order.technicalNotes && (
-            <div style={{ marginTop: gap, fontSize: fs('6.5pt', '7pt', '7.5pt'), border: '1px solid #000', padding: '0.5mm 2mm', overflow: 'hidden', maxHeight: fs('5mm', '6mm', '8mm'), lineHeight: '1.2' }}>
-              <strong>Notes:</strong> {order.technicalNotes}
-            </div>
-          )}
-
-          {showReadyDate && order.expectedCompletionDate && (
-            <div style={{ marginTop: gap, textAlign: 'center', border: '2px solid #000', padding: fs('0.8mm 1.5mm', '1.5mm 2mm', '2mm 3mm'), fontSize: fs('7.5pt', '8.5pt', '9.5pt'), fontWeight: 800 }}>
-              Date de retrait: {fmtReady(order.expectedCompletionDate)}
-            </div>
-          )}
-
-          <div style={{ marginTop: gap }}>
-            <FooterContent large={largeFooter} />
-          </div>
+      {showPrescription && hasNotes && order.technicalNotes && (
+        <div style={{ flex: '0 0 auto', marginTop: gap, fontSize: fs('6.5pt', '7pt', '7.5pt'), border: '1px solid #000', padding: '0.5mm 2mm', overflow: 'hidden', maxHeight: fs('5mm', '6mm', '8mm'), lineHeight: '1.2' }}>
+          <strong>Notes:</strong> {order.technicalNotes}
         </div>
+      )}
+
+      {showReadyDate && order.expectedCompletionDate && (
+        <div style={{ flex: '0 0 auto', marginTop: gap, textAlign: 'center', border: '2px solid #000', padding: fs('0.8mm 1.5mm', '1.5mm 2mm', '2mm 3mm'), fontSize: fs('7.5pt', '8.5pt', '9.5pt'), fontWeight: 800 }}>
+          Date de retrait: {fmtReady(order.expectedCompletionDate)}
+        </div>
+      )}
+
+      <div style={{ flex: '1 1 auto', marginTop: gap }}>
+        <FooterContent large={largeFooter} />
       </div>
-    )
-  }
+    </div>
+  )
 
   // ═══════ Full A5 Layout ═══════
   // Atelier always gets more space (flex 3 ≈ 60%) since it has prescription + notes

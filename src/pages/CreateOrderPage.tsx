@@ -1958,16 +1958,16 @@ export default function CreateOrderPage() {
 
       {/* Hidden print content — single order */}
       {createdOrder && createdOrders.length === 0 && (
-        <div className="print-slip-content hidden print:block">
+        <div className="print-slip-content" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm', height: '210mm' }}>
           <OrderSlip order={createdOrder} />
         </div>
       )}
 
       {/* Hidden print content — batch orders (each on its own A5 page) */}
       {createdOrders.length > 0 && (
-        <div className="print-slip-content hidden print:block">
+        <div className="print-slip-content" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm' }}>
           {createdOrders.map((o, i) => (
-            <div key={o.id} style={{ pageBreakAfter: i < createdOrders.length - 1 ? 'always' : 'auto' }}>
+            <div key={o.id} style={{ height: '210mm', pageBreakAfter: i < createdOrders.length - 1 ? 'always' : 'auto' }}>
               <OrderSlip order={o} />
             </div>
           ))}

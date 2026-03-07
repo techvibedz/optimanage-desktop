@@ -55,7 +55,7 @@ export default function PrintOrderSlipPage() {
         .dark .slip-page { background: #0a0a0f; }
         .slip-toolbar { flex-shrink: 0; }
         .slip-scroll { flex: 1; overflow-y: auto; }
-        .print-slip-target { position: absolute; left: -9999px; top: 0; width: 148mm; }
+        .print-slip-target { position: absolute; left: -9999px; top: 0; width: 148mm; height: 210mm; }
         @media print {
           body * { visibility: hidden; }
           .print-slip-target, .print-slip-target * { visibility: visible; }

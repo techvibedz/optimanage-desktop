@@ -364,7 +364,7 @@ export default function OrderDetailsPage() {
       )}
 
       {/* Hidden print target — always in DOM, outside overlay */}
-      <div className="print-slip-content" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm' }}>
+      <div className="print-slip-content" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm', height: '210mm' }}>
         <OrderSlip order={order} />
       </div>
 
