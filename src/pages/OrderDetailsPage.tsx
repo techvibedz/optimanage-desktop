@@ -336,10 +336,10 @@ export default function OrderDetailsPage() {
     <>
       <style>{`
         @media print {
-          body * { visibility: hidden !important; }
-          .print-slip-content, .print-slip-content * { visibility: visible !important; }
-          .print-slip-content { position: absolute; left: 0; top: 0; width: 148mm; height: 210mm; margin: 0; padding: 0; }
-          .no-print, .print-overlay { display: none !important; }
+          html, body { margin: 0 !important; padding: 0 !important; width: 148mm !important; height: 210mm !important; overflow: hidden !important; }
+          body > *, body > * > * { display: none !important; }
+          .print-slip-content { display: block !important; position: fixed !important; left: 0 !important; top: 0 !important; width: 148mm !important; height: 210mm !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; z-index: 99999 !important; }
+          .print-slip-content * { visibility: visible !important; }
           @page { size: A5 portrait; margin: 0mm 0mm 2mm 0mm; }
         }
       `}</style>

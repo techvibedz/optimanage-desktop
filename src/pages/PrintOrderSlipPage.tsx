@@ -57,10 +57,10 @@ export default function PrintOrderSlipPage() {
         .slip-scroll { flex: 1; overflow-y: auto; }
         .print-slip-target { position: absolute; left: -9999px; top: 0; width: 148mm; height: 210mm; }
         @media print {
-          body * { visibility: hidden; }
-          .print-slip-target, .print-slip-target * { visibility: visible; }
-          .print-slip-target { position: absolute; left: 0; top: 0; width: 148mm; height: 210mm; }
-          .no-print, .slip-page { display: none !important; }
+          html, body { margin: 0 !important; padding: 0 !important; width: 148mm !important; height: 210mm !important; overflow: hidden !important; }
+          body > *, body > * > * { display: none !important; }
+          .print-slip-target { display: block !important; position: fixed !important; left: 0 !important; top: 0 !important; width: 148mm !important; height: 210mm !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; z-index: 99999 !important; }
+          .print-slip-target * { visibility: visible !important; }
           @page { size: A5 portrait; margin: 0mm 0mm 2mm 0mm; }
         }
       `}</style>
