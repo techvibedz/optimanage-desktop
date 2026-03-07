@@ -981,7 +981,12 @@ export default function CreateOrderPage() {
       balanceDue,
       status: 'in_progress',
       expectedCompletionDate: readyDate ? new Date(readyDate).toISOString() : new Date().toISOString(),
-      createdAt: orderDate ? new Date(orderDate).toISOString() : new Date().toISOString(),
+      createdAt: (() => {
+        const now = new Date()
+        if (!orderDate) return now.toISOString()
+        const [y, m, d] = orderDate.split('-').map(Number)
+        return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString()
+      })(),
       customerNotes: notes,
       technicalNotes: [
         ...(remise !== 0 ? [`Remise: ${remise > 0 ? '+' : ''}${remise} DA`] : []),
