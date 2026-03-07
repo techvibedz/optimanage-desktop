@@ -996,7 +996,7 @@ function registerIpcHandlers() {
         prisma.order.findMany({
           where: { userId },
           include: { customer: { select: { firstName: true, lastName: true } } },
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { orderNumber: 'desc' }],
           take: limit,
         }),
         prisma.customer.findMany({

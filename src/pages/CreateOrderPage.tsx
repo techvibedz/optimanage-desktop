@@ -569,7 +569,7 @@ export default function CreateOrderPage() {
   const contactLensTotal = useMemo(() => selectedContactLenses.reduce((s, cl) => s + cl.price * cl.qty, 0), [selectedContactLenses])
   const servicesTotal = useMemo(() => services.reduce((s, svc) => s + svc.price, 0), [services])
   const subtotal = framesTotal + lensTotal + contactLensTotal + servicesTotal
-  const totalPrice = Math.max(0, subtotal - remise)
+  const totalPrice = Math.max(0, subtotal + remise)
   const balanceDue = Math.max(0, totalPrice - depositAmount)
 
   // ─── Handlers ───────────────────────────────────────────────────────────
@@ -984,7 +984,7 @@ export default function CreateOrderPage() {
       createdAt: orderDate ? new Date(orderDate).toISOString() : new Date().toISOString(),
       customerNotes: notes,
       technicalNotes: [
-        ...(remise > 0 ? [`Remise: -${remise} DA`] : []),
+        ...(remise !== 0 ? [`Remise: ${remise > 0 ? '+' : ''}${remise} DA`] : []),
         ...(selectedContactLenses.length > 0 ? [`Contact Lenses: ${selectedContactLenses.map(cl => `${cl.brand}${cl.model ? ' ' + cl.model : ''} x${cl.qty}: ${cl.price * cl.qty} DA`).join(', ')}`] : []),
         ...(services.length > 0 ? [`Additional Services: ${services.map(s => `${s.name}: ${s.price} DA`).join(', ')}`] : []),
       ].join(' | '),
@@ -1818,11 +1818,10 @@ export default function CreateOrderPage() {
 
                 {/* Remise / Discount */}
                 <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">{t('orders.discount') || 'Remise'}</span>
+                  <span className="text-muted-foreground">{t('orders.discount')}</span>
                   <div className="flex items-center gap-1">
-                    <span className="text-muted-foreground">-</span>
-                    <input type="number" min={0} value={remise || ''} onChange={e => setRemise(Number(e.target.value) || 0)}
-                      placeholder="0" className="w-20 px-2 py-1 border border-border rounded text-sm text-right bg-background [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                    <input type="number" value={remise || ''} onChange={e => setRemise(Number(e.target.value) || 0)}
+                      placeholder="-200" className="w-24 px-2 py-1 border border-border rounded text-sm text-right bg-background [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                     <span className="text-xs text-muted-foreground">{t('orders.currency')}</span>
                   </div>
                 </div>

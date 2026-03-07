@@ -263,6 +263,7 @@ export const translations: Record<Language, Translations> = {
     'orders.vpRight': 'VP Right',
     'orders.vpLeft': 'VP Left',
     'orders.services': 'Services',
+    'orders.discount': 'Discount',
 
     // Prescriptions
     'prescriptions.title': 'Prescriptions',
@@ -714,6 +715,7 @@ export const translations: Record<Language, Translations> = {
     'orders.vpRight': 'VP Droit',
     'orders.vpLeft': 'VP Gauche',
     'orders.services': 'Services',
+    'orders.discount': 'Remise',
 
     // Prescriptions
     'prescriptions.title': 'Ordonnances',
