@@ -114,14 +114,13 @@ export default function LensSummaryPage() {
     allLenses.forEach(lens => {
       const key = lens.isManual ? `manual_${lens.manualIndex}` : `${lens.sph}_${lens.cyl}_${lens.lensType}`
       if (!grouped[key]) {
-        grouped[key] = { ...lens, lensIds: [] }
+        grouped[key] = { ...lens, quantity: 0, lensIds: [] }
       }
       if (lens.isManual) {
         grouped[key].quantity = lens.quantity
         grouped[key].isTypeOnly = lens.isTypeOnly
       } else {
-        grouped[key].quantity += (key === lens.id ? 0 : lens.quantity)
-        if (grouped[key].quantity === 0) grouped[key].quantity = lens.quantity
+        grouped[key].quantity += lens.quantity
         grouped[key].lensIds?.push(lens.id)
         lens.orders.forEach(o => { if (!grouped[key].orders.includes(o)) grouped[key].orders.push(o) })
       }
@@ -158,7 +157,7 @@ export default function LensSummaryPage() {
     doc.text(t('lensSummary.title'), 20, 30)
     doc.setFontSize(16)
     doc.setFont('helvetica', 'normal')
-    doc.text(`${new Date().toLocaleDateString()}`, 20, 45)
+    doc.text(`${new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })}`, 20, 45)
     const totalLenses = lensSummary.reduce((sum, item) => sum + item.quantity, 0)
     doc.text(`Total: ${totalLenses} ${t('lensSummary.lenses')}`, 20, 60)
 
@@ -236,7 +235,7 @@ export default function LensSummaryPage() {
                         <span className="px-1.5 py-0.5 rounded text-[10px] border border-border capitalize">{order.status?.replace('_', ' ')}</span>
                       </div>
                       <p className="text-xs text-muted-foreground truncate mt-0.5">
-                        {order.customer?.firstName} {order.customer?.lastName} • {order.createdAt ? new Date(order.createdAt).toLocaleDateString() : ''}
+                        {order.customer?.firstName} {order.customer?.lastName} • {order.createdAt ? new Date(order.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
                       </p>
                     </div>
                   </div>

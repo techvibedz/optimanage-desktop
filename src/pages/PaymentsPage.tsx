@@ -331,7 +331,7 @@ export default function PaymentsPage() {
                         {p.paymentMethod || '-'}
                       </span>
                     </td>
-                    <td>{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString() : '-'}</td>
+                    <td>{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</td>
                     <td>
                       <div className="flex items-center gap-1">
                         {p.order && (

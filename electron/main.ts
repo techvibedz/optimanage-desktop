@@ -366,7 +366,7 @@ function registerIpcHandlers() {
             vpRightEyeLensType: { select: { id: true, name: true } },
             vpLeftEyeLensType: { select: { id: true, name: true } },
           },
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ createdAt: 'desc' }, { orderNumber: 'desc' }],
           skip: offset,
           take: limit,
         }),

@@ -133,7 +133,7 @@ export default function ExpensesPage() {
                     <td className="font-medium">{exp.description}</td>
                     <td className="text-red-500 font-medium">{exp.amount?.toLocaleString()} DA</td>
                     <td><span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 dark:bg-gray-700">{exp.category}</span></td>
-                    <td>{exp.date ? new Date(exp.date).toLocaleDateString() : '-'}</td>
+                    <td>{exp.date ? new Date(exp.date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</td>
                     <td>
                       <button onClick={() => handleDelete(exp.id)} className="p-1.5 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30"><Trash2 className="h-4 w-4 text-red-500" /></button>
                     </td>

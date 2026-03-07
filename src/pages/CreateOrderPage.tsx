@@ -138,7 +138,7 @@ function PrescriptionSelect({ prescriptions, value, onChange, t }: {
       <div className="w-full px-3 py-2.5 border border-border rounded-lg text-sm bg-background cursor-pointer flex items-center justify-between"
         onClick={() => setOpen(!open)}>
         <span className={selected ? '' : 'text-muted-foreground'}>
-          {selected ? `Dr. ${selected.doctorName} — ${new Date(selected.examinationDate).toLocaleDateString()}` : t('orders.noPrescription')}
+          {selected ? `Dr. ${selected.doctorName} — ${new Date(selected.examinationDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}` : t('orders.noPrescription')}
         </span>
         <div className="flex items-center gap-1">
           {value && (
@@ -166,7 +166,7 @@ function PrescriptionSelect({ prescriptions, value, onChange, t }: {
                     Dr. {p.doctorName}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-muted-foreground">{new Date(p.examinationDate).toLocaleDateString()}</span>
+                    <span className="text-xs text-muted-foreground">{new Date(p.examinationDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
                     {p.id === value && <Check className="h-4 w-4 text-primary" />}
                   </div>
                 </div>
@@ -423,6 +423,7 @@ export default function CreateOrderPage() {
   const [newServicePrice, setNewServicePrice] = useState('')
 
   // Pricing
+  const [remise, setRemise] = useState(0)
   const [depositAmount, setDepositAmount] = useState(0)
   const [notes, setNotes] = useState('')
   const [readyDate, setReadyDate] = useState('')
@@ -567,14 +568,15 @@ export default function CreateOrderPage() {
 
   const contactLensTotal = useMemo(() => selectedContactLenses.reduce((s, cl) => s + cl.price * cl.qty, 0), [selectedContactLenses])
   const servicesTotal = useMemo(() => services.reduce((s, svc) => s + svc.price, 0), [services])
-  const totalPrice = framesTotal + lensTotal + contactLensTotal + servicesTotal
+  const subtotal = framesTotal + lensTotal + contactLensTotal + servicesTotal
+  const totalPrice = Math.max(0, subtotal - remise)
   const balanceDue = Math.max(0, totalPrice - depositAmount)
 
   // ─── Handlers ───────────────────────────────────────────────────────────
   const addService = () => {
     const price = parseFloat(newServicePrice)
-    if (!newServiceName.trim() || isNaN(price)) return
-    setServices(prev => [...prev, { name: newServiceName.trim(), price }])
+    if (isNaN(price) || price === 0) return
+    setServices(prev => [...prev, { name: newServiceName.trim() || 'Service', price }])
     setNewServiceName('')
     setNewServicePrice('')
   }
@@ -982,6 +984,7 @@ export default function CreateOrderPage() {
       createdAt: orderDate ? new Date(orderDate).toISOString() : new Date().toISOString(),
       customerNotes: notes,
       technicalNotes: [
+        ...(remise > 0 ? [`Remise: -${remise} DA`] : []),
         ...(selectedContactLenses.length > 0 ? [`Contact Lenses: ${selectedContactLenses.map(cl => `${cl.brand}${cl.model ? ' ' + cl.model : ''} x${cl.qty}: ${cl.price * cl.qty} DA`).join(', ')}`] : []),
         ...(services.length > 0 ? [`Additional Services: ${services.map(s => `${s.name}: ${s.price} DA`).join(', ')}`] : []),
       ].join(' | '),
@@ -1006,7 +1009,7 @@ export default function CreateOrderPage() {
     setVpLeftLensId(''); setVpLeftLensPrice(0); setVpLeftQty(1)
     setSelectedContactLenses([])
     setServices([]); setNewServiceName(''); setNewServicePrice('')
-    setDepositAmount(0)
+    setRemise(0); setDepositAmount(0)
     setNotes('')
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1)
     setReadyDate(tomorrow.toISOString().split('T')[0])
@@ -1138,10 +1141,12 @@ export default function CreateOrderPage() {
     <>
     <style>{`
       @media print {
-        html, body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
+        html, body { margin: 0 !important; padding: 0 !important; overflow: visible !important; }
         #root { visibility: hidden !important; height: 0 !important; overflow: hidden !important; }
         .print-slip-content, .print-slip-content * { visibility: visible !important; }
-        .print-slip-content { position: fixed !important; left: 0 !important; top: 0 !important; width: 148mm !important; height: 210mm !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; z-index: 99999 !important; }
+        .print-slip-content { position: absolute !important; left: 0 !important; top: 0 !important; width: 148mm !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; z-index: 99999 !important; }
+        .print-slip-content > div { page-break-after: always; }
+        .print-slip-content > div:last-child { page-break-after: auto; }
         @page { size: A5 portrait; margin: 0mm 0mm 4mm 0mm; }
       }
     `}</style>
@@ -1535,8 +1540,8 @@ export default function CreateOrderPage() {
             </div>
           )}
 
-          {/* 3. VL Distance Lenses — show if no prescription selected OR prescription has VL data */}
-          {(!selectedPrescription || selectedPrescription.hasVLData) && (
+          {/* 3. VL Distance Lenses — show only when prescription is selected and has VL data */}
+          {(selectedPrescription && selectedPrescription.hasVLData) && (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-border p-5">
               <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
                 <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-xs flex items-center justify-center font-bold">3</span>
@@ -1580,8 +1585,8 @@ export default function CreateOrderPage() {
             </div>
           )}
 
-          {/* 4. VP Near Lenses — show if no prescription selected OR prescription has VP data */}
-          {(!selectedPrescription || selectedPrescription.hasVPData) && (
+          {/* 4. VP Near Lenses — show only when prescription is selected and has VP data */}
+          {(selectedPrescription && selectedPrescription.hasVPData) && (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-border p-5">
               <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
                 <span className="w-6 h-6 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs flex items-center justify-center font-bold">4</span>
@@ -1811,6 +1816,17 @@ export default function CreateOrderPage() {
                   </div>
                 )}
 
+                {/* Remise / Discount */}
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{t('orders.discount') || 'Remise'}</span>
+                  <div className="flex items-center gap-1">
+                    <span className="text-muted-foreground">-</span>
+                    <input type="number" min={0} value={remise || ''} onChange={e => setRemise(Number(e.target.value) || 0)}
+                      placeholder="0" className="w-20 px-2 py-1 border border-border rounded text-sm text-right bg-background [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                    <span className="text-xs text-muted-foreground">{t('orders.currency')}</span>
+                  </div>
+                </div>
+
                 <div className="border-t border-border pt-3">
                   <div className="flex justify-between text-base font-bold">
                     <span>{t('common.total')}</span>
@@ -1958,8 +1974,10 @@ export default function CreateOrderPage() {
 
       {/* Hidden print content — single order */}
       {createdOrder && createdOrders.length === 0 && (
-        <div className="print-slip-content" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm', height: '210mm' }}>
-          <OrderSlip order={createdOrder} />
+        <div className="print-slip-content" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm' }}>
+          <div style={{ height: '210mm' }}>
+            <OrderSlip order={createdOrder} />
+          </div>
         </div>
       )}
 

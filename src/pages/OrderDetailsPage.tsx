@@ -496,7 +496,7 @@ export default function OrderDetailsPage() {
             <div className="space-y-2 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">{t('orders.orderCreated') || 'Created'}</span>
-                <span>{order.createdAt ? new Date(order.createdAt).toLocaleDateString() : '-'}</span>
+                <span>{order.createdAt ? new Date(order.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : '-'}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">{t('orders.expectedCompletion')}</span>
@@ -505,12 +505,12 @@ export default function OrderDetailsPage() {
                     onChange={e => setEditFields({...editFields, expectedCompletionDate: e.target.value})}
                     className="px-2 py-1 border border-border rounded text-sm bg-background w-36" />
                 ) : (
-                  <span>{order.expectedCompletionDate ? new Date(order.expectedCompletionDate).toLocaleDateString() : '-'}</span>
+                  <span>{order.expectedCompletionDate ? new Date(order.expectedCompletionDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : '-'}</span>
                 )}
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">{t('orders.lastUpdated') || 'Updated'}</span>
-                <span>{order.updatedAt ? new Date(order.updatedAt).toLocaleDateString() : '-'}</span>
+                <span>{order.updatedAt ? new Date(order.updatedAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : '-'}</span>
               </div>
             </div>
           </div>
@@ -574,7 +574,7 @@ export default function OrderDetailsPage() {
                 <tbody>
                   {order.payments.map((payment: any, index: number) => (
                     <tr key={payment.id} className={`border-b border-border/20 ${index % 2 === 0 ? 'bg-muted/20' : ''}`}>
-                      <td className="py-2.5 px-3">{payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString() : '-'}</td>
+                      <td className="py-2.5 px-3">{payment.paymentDate ? new Date(payment.paymentDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</td>
                       <td className="py-2.5 px-3 font-medium text-green-600">{payment.amount?.toLocaleString()} DA</td>
                       <td className="py-2.5 px-3">
                         <span className="px-2 py-0.5 rounded-md text-xs border border-border capitalize">{payment.paymentMethod || '-'}</span>
@@ -615,7 +615,7 @@ export default function OrderDetailsPage() {
                   </div>
                   <div>
                     <span className="text-muted-foreground text-xs">{t('common.examinationDate') || 'Date'}</span>
-                    <p>{order.prescription.examinationDate ? new Date(order.prescription.examinationDate).toLocaleDateString() : '-'}</p>
+                    <p>{order.prescription.examinationDate ? new Date(order.prescription.examinationDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : '-'}</p>
                   </div>
                   <div>
                     <span className="text-muted-foreground text-xs">PD</span>
@@ -781,7 +781,7 @@ export default function OrderDetailsPage() {
                             </div>
                           ) : (
                             <>
-                              {order.vlRightEyeLensType && <p className="text-xs">{order.vlRightEyeLensType.name}</p>}
+                              {order.vlRightEyeLensType && <p className="text-xs">{order.vlRightEyeLensType.name}{(order.vlRightEyeLensQuantity || 1) > 1 ? ` ×${order.vlRightEyeLensQuantity}` : ''}</p>}
                               <p className="font-medium text-green-600">{(order.vlRightEyeLensPrice || 0).toLocaleString()} DA</p>
                             </>
                           )}
@@ -801,7 +801,7 @@ export default function OrderDetailsPage() {
                             </div>
                           ) : (
                             <>
-                              {order.vlLeftEyeLensType && <p className="text-xs">{order.vlLeftEyeLensType.name}</p>}
+                              {order.vlLeftEyeLensType && <p className="text-xs">{order.vlLeftEyeLensType.name}{(order.vlLeftEyeLensQuantity || 1) > 1 ? ` ×${order.vlLeftEyeLensQuantity}` : ''}</p>}
                               <p className="font-medium text-green-600">{(order.vlLeftEyeLensPrice || 0).toLocaleString()} DA</p>
                             </>
                           )}
@@ -830,7 +830,7 @@ export default function OrderDetailsPage() {
                             </div>
                           ) : (
                             <>
-                              {order.vpRightEyeLensType && <p className="text-xs">{order.vpRightEyeLensType.name}</p>}
+                              {order.vpRightEyeLensType && <p className="text-xs">{order.vpRightEyeLensType.name}{(order.vpRightEyeLensQuantity || 1) > 1 ? ` ×${order.vpRightEyeLensQuantity}` : ''}</p>}
                               <p className="font-medium text-green-600">{(order.vpRightEyeLensPrice || 0).toLocaleString()} DA</p>
                             </>
                           )}
@@ -850,7 +850,7 @@ export default function OrderDetailsPage() {
                             </div>
                           ) : (
                             <>
-                              {order.vpLeftEyeLensType && <p className="text-xs">{order.vpLeftEyeLensType.name}</p>}
+                              {order.vpLeftEyeLensType && <p className="text-xs">{order.vpLeftEyeLensType.name}{(order.vpLeftEyeLensQuantity || 1) > 1 ? ` ×${order.vpLeftEyeLensQuantity}` : ''}</p>}
                               <p className="font-medium text-green-600">{(order.vpLeftEyeLensPrice || 0).toLocaleString()} DA</p>
                             </>
                           )}

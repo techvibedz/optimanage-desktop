@@ -15,6 +15,10 @@ interface OrderSlipProps {
     vlLeftEyeLensType?: LensTypeInfo
     vpRightEyeLensType?: LensTypeInfo
     vpLeftEyeLensType?: LensTypeInfo
+    vlRightEyeLensQuantity?: number
+    vlLeftEyeLensQuantity?: number
+    vpRightEyeLensQuantity?: number
+    vpLeftEyeLensQuantity?: number
     prescription?: {
       hasVLData?: boolean; hasVPData?: boolean
       vlRightEyeSphere?: number; vlRightEyeCylinder?: number; vlRightEyeAxis?: number
@@ -202,15 +206,15 @@ export default function OrderSlip({ order }: OrderSlipProps) {
           {(order.vlRightEyeLensType || order.vlLeftEyeLensType) && (
             <tr>
               <td style={{ ...cell, textAlign: 'left', fontWeight: 700 }}>VL</td>
-              <td style={{ ...cell, fontSize: lensFs, fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vlRightEyeLensType?.name || '-'}</td>
-              <td style={{ ...cell, fontSize: lensFs, fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vlLeftEyeLensType?.name || '-'}</td>
+              <td style={{ ...cell, fontSize: lensFs, fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vlRightEyeLensType?.name || '-'}{(order.vlRightEyeLensQuantity || 1) > 1 ? ` ×${order.vlRightEyeLensQuantity}` : ''}</td>
+              <td style={{ ...cell, fontSize: lensFs, fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vlLeftEyeLensType?.name || '-'}{(order.vlLeftEyeLensQuantity || 1) > 1 ? ` ×${order.vlLeftEyeLensQuantity}` : ''}</td>
             </tr>
           )}
           {(order.vpRightEyeLensType || order.vpLeftEyeLensType) && (
             <tr>
               <td style={{ ...cell, textAlign: 'left', fontWeight: 800 }}>VP</td>
-              <td style={{ ...cell, fontSize: lensFs, fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vpRightEyeLensType?.name || '-'}</td>
-              <td style={{ ...cell, fontSize: lensFs, fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vpLeftEyeLensType?.name || '-'}</td>
+              <td style={{ ...cell, fontSize: lensFs, fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vpRightEyeLensType?.name || '-'}{(order.vpRightEyeLensQuantity || 1) > 1 ? ` ×${order.vpRightEyeLensQuantity}` : ''}</td>
+              <td style={{ ...cell, fontSize: lensFs, fontWeight: 700, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', maxWidth: '45mm' }}>{order.vpLeftEyeLensType?.name || '-'}{(order.vpLeftEyeLensQuantity || 1) > 1 ? ` ×${order.vpLeftEyeLensQuantity}` : ''}</td>
             </tr>
           )}
           {!order.vlRightEyeLensType && !order.vlLeftEyeLensType && !order.vpRightEyeLensType && !order.vpLeftEyeLensType && order.lensType && (

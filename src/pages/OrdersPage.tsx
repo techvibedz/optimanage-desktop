@@ -160,7 +160,7 @@ export default function OrdersPage() {
                     <td>
                       {getPaymentBadge(o)}
                     </td>
-                    <td>{o.createdAt ? new Date(o.createdAt).toLocaleDateString() : '-'}</td>
+                    <td>{o.createdAt ? new Date(o.createdAt).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</td>
                     <td>
                       <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
                         <button onClick={() => navigate(`/orders/${o.id}`)} className="p-1.5 rounded-md hover:bg-primary/10" title={t('common.view') || 'View'}>

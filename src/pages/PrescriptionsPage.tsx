@@ -184,7 +184,7 @@ export default function PrescriptionsPage() {
                   <tr key={p.id}>
                     <td className="font-medium">{p.customer ? `${p.customer.firstName} ${p.customer.lastName}` : '-'}</td>
                     <td>{p.doctor || '-'}</td>
-                    <td>{p.examinationDate ? new Date(p.examinationDate).toLocaleDateString() : '-'}</td>
+                    <td>{p.examinationDate ? new Date(p.examinationDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</td>
                     <td className="text-xs">{p.vlOdSphere || '-'}/{p.vlOdCylinder || '-'}x{p.vlOdAxis || '-'}</td>
                     <td className="text-xs">{p.vlOsSphere || '-'}/{p.vlOsCylinder || '-'}x{p.vlOsAxis || '-'}</td>
                     <td>
