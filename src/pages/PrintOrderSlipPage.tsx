@@ -59,9 +59,9 @@ export default function PrintOrderSlipPage() {
         @media print {
           body * { visibility: hidden; }
           .print-slip-target, .print-slip-target * { visibility: visible; }
-          .print-slip-target { position: absolute; left: 0; top: 0; width: 100%; }
+          .print-slip-target { position: absolute; left: 0; top: 0; width: 148mm; height: 210mm; }
           .no-print, .slip-page { display: none !important; }
-          @page { size: A5 portrait; margin: 0; }
+          @page { size: A5 portrait; margin: 0mm 0mm 2mm 0mm; }
         }
       `}</style>
 

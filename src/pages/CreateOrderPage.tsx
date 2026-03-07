@@ -1140,9 +1140,9 @@ export default function CreateOrderPage() {
       @media print {
         body * { visibility: hidden !important; }
         .print-slip-content, .print-slip-content * { visibility: visible !important; }
-        .print-slip-content { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; }
+        .print-slip-content { position: absolute; left: 0; top: 0; width: 148mm; height: 210mm; margin: 0; padding: 0; }
         .no-print { display: none !important; }
-        @page { size: A5 portrait; margin: 0; }
+        @page { size: A5 portrait; margin: 0mm 0mm 2mm 0mm; }
       }
     `}</style>
     <div className="max-w-5xl mx-auto pb-12">
