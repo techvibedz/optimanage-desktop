@@ -339,13 +339,13 @@ export default function OrderDetailsPage() {
           body * { visibility: hidden !important; }
           .print-slip-content, .print-slip-content * { visibility: visible !important; }
           .print-slip-content { position: absolute; left: 0; top: 0; width: 148mm; height: 210mm; margin: 0; padding: 0; }
-          .no-print { display: none !important; }
+          .no-print, .print-overlay { display: none !important; }
           @page { size: A5 portrait; margin: 0mm 0mm 2mm 0mm; }
         }
       `}</style>
       {/* Print overlay */}
       {showPrintSlip && (
-        <div className="fixed inset-0 z-[9999] bg-white print:bg-white" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+        <div className="print-overlay fixed inset-0 z-[9999] bg-white" style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
           <div className="no-print" style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 24px', borderBottom: '1px solid #e5e7eb' }}>
             <span style={{ fontSize: '14px', fontWeight: 600 }}>Print Preview</span>
             <div style={{ display: 'flex', gap: '8px' }}>

@@ -1,0 +1,1 @@
+{"body":"## Changes\\n- Fix blank pages when printing from Order Details\\n- Replace broken transform:scale with pure CSS flex layout\\n- All print targets now have explicit 148mm x 210mm dimensions\\n- Sections grow proportionally to fill each half-page","name":"v1.2.25 - Print Fixes","target_commitish":"master","tag_name":"v1.2.25","prerelease":false,"draft":false}
