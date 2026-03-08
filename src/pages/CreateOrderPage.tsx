@@ -1146,12 +1146,14 @@ export default function CreateOrderPage() {
     <>
     <style>{`
       @media print {
-        html, body { margin: 0 !important; padding: 0 !important; overflow: visible !important; }
+        html, body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
         #root { visibility: hidden !important; height: 0 !important; overflow: hidden !important; }
-        .print-slip-content, .print-slip-content * { visibility: visible !important; }
-        .print-slip-content { position: absolute !important; left: 0 !important; top: 0 !important; width: 148mm !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; z-index: 99999 !important; }
-        .print-slip-content > div { page-break-after: always; }
-        .print-slip-content > div:last-child { page-break-after: auto; }
+        .print-slip-single, .print-slip-single * { visibility: visible !important; }
+        .print-slip-single { position: fixed !important; left: 0 !important; top: 0 !important; width: 148mm !important; height: 210mm !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; z-index: 99999 !important; }
+        .print-slip-batch, .print-slip-batch * { visibility: visible !important; }
+        .print-slip-batch { position: absolute !important; left: 0 !important; top: 0 !important; width: 148mm !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; z-index: 99999 !important; }
+        .print-slip-batch > div { page-break-after: always; }
+        .print-slip-batch > div:last-child { page-break-after: auto; }
         @page { size: A5 portrait; margin: 0mm 0mm 4mm 0mm; }
       }
     `}</style>
@@ -1978,16 +1980,14 @@ export default function CreateOrderPage() {
 
       {/* Hidden print content — single order */}
       {createdOrder && createdOrders.length === 0 && (
-        <div className="print-slip-content" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm' }}>
-          <div style={{ height: '210mm' }}>
-            <OrderSlip order={createdOrder} />
-          </div>
+        <div className="print-slip-single" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm', height: '210mm' }}>
+          <OrderSlip order={createdOrder} />
         </div>
       )}
 
       {/* Hidden print content — batch orders (each on its own A5 page) */}
       {createdOrders.length > 0 && (
-        <div className="print-slip-content" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm' }}>
+        <div className="print-slip-batch" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm' }}>
           {createdOrders.map((o, i) => (
             <div key={o.id} style={{ height: '210mm', pageBreakAfter: i < createdOrders.length - 1 ? 'always' : 'auto' }}>
               <OrderSlip order={o} />
