@@ -1069,8 +1069,8 @@ export default function CreateOrderPage() {
       toast.success(`${fullOrders.length} orders created!`)
       setCreatedOrders(fullOrders)
       setOrderQueue([])
-      // Wait for React to render the hidden multi-slip content
-      await new Promise(r => setTimeout(r, 200))
+      // Wait for React to render + useLayoutEffect scaling to fire
+      await new Promise(r => setTimeout(r, 350))
       await window.electronAPI.printSlip()
       setCreatedOrders([])
     }
@@ -1107,8 +1107,8 @@ export default function CreateOrderPage() {
         const fullOrder = await window.electronAPI.getOrder(result.data.id)
         if (fullOrder.data) {
           setCreatedOrder(fullOrder.data)
-          // Wait for React to render the hidden print-slip-content div
-          await new Promise(r => setTimeout(r, 100))
+          // Wait for React to render + useLayoutEffect scaling to fire
+          await new Promise(r => setTimeout(r, 350))
           await window.electronAPI.printSlip()
         }
         navigate('/orders')
@@ -1980,14 +1980,14 @@ export default function CreateOrderPage() {
 
       {/* Hidden print content — single order */}
       {createdOrder && createdOrders.length === 0 && (
-        <div className="print-slip-single" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm', height: '210mm' }}>
+        <div className="print-slip-single" style={{ position: 'absolute', top: 0, left: 0, width: '148mm', height: '210mm', visibility: 'hidden' }}>
           <OrderSlip order={createdOrder} />
         </div>
       )}
 
       {/* Hidden print content — batch orders (each on its own A5 page) */}
       {createdOrders.length > 0 && (
-        <div className="print-slip-batch" style={{ position: 'absolute', left: '-9999px', top: 0, width: '148mm' }}>
+        <div className="print-slip-batch" style={{ position: 'absolute', top: 0, left: 0, width: '148mm', visibility: 'hidden' }}>
           {createdOrders.map((o, i) => (
             <div key={o.id} style={{ height: '210mm', pageBreakAfter: i < createdOrders.length - 1 ? 'always' : 'auto' }}>
               <OrderSlip order={o} />
