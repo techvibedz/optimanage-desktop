@@ -441,11 +441,6 @@ export default function CreateOrderPage() {
   const cameraVideoRef = useRef<HTMLVideoElement>(null)
   const cameraStreamRef = useRef<MediaStream | null>(null)
   const cameraCanvasRef = useRef<HTMLCanvasElement>(null)
-  const [autoScanStatus, setAutoScanStatus] = useState<'idle' | 'scanning' | 'analyzing' | 'found'>('idle')
-  const autoScanTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const autoScanActiveRef = useRef(false)
-  const consecutiveDetectionsRef = useRef(0)
-  const REQUIRED_DETECTIONS = 4  // 4 consecutive detections at 600ms each = ~2.4s of stable document
 
   // Order queue for batch create & print
   const [orderQueue, setOrderQueue] = useState<any[]>([])
@@ -724,181 +719,10 @@ export default function CreateOrderPage() {
     await processAiScan(base64)
   }
 
-  // ── Live Camera Scanner with Smart Auto-Detection ──────────────────────
-  // Phase 1: Fast local check every 500ms — detect if a document/paper is visible
-  // Phase 2: Only when document detected → send to AI for full prescription extraction
-
-  const captureFrame = (): string | null => {
-    const video = cameraVideoRef.current
-    const canvas = cameraCanvasRef.current
-    if (!video || !canvas || video.videoWidth === 0) return null
-    canvas.width = video.videoWidth
-    canvas.height = video.videoHeight
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return null
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-    return canvas.toDataURL('image/jpeg', 0.90)
-  }
-
-  // Fast local document detection using edge density analysis
-  // Returns true if the center of the frame has enough edges (text/lines on paper)
-  const detectDocumentInFrame = (): boolean => {
-    const video = cameraVideoRef.current
-    const canvas = cameraCanvasRef.current
-    if (!video || !canvas || video.videoWidth === 0) return false
-    // Use a small resolution for speed
-    const w = 320
-    const h = Math.round(w * (video.videoHeight / video.videoWidth))
-    canvas.width = w
-    canvas.height = h
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return false
-    ctx.drawImage(video, 0, 0, w, h)
-
-    // Analyze the center 60% of the image (where the document should be)
-    const cx = Math.round(w * 0.2), cy = Math.round(h * 0.2)
-    const cw = Math.round(w * 0.6), ch = Math.round(h * 0.6)
-    const imgData = ctx.getImageData(cx, cy, cw, ch)
-    const pixels = imgData.data
-
-    // Convert to grayscale and compute edge density (simple Sobel-like horizontal gradient)
-    let edgeCount = 0
-    const stride = cw * 4
-    for (let y = 1; y < ch - 1; y++) {
-      for (let x = 1; x < cw - 1; x++) {
-        const i = (y * cw + x) * 4
-        const gray = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114
-        const grayRight = pixels[i + 4] * 0.299 + pixels[i + 5] * 0.587 + pixels[i + 6] * 0.114
-        const grayBelow = pixels[i + stride] * 0.299 + pixels[i + stride + 1] * 0.587 + pixels[i + stride + 2] * 0.114
-        const gx = Math.abs(gray - grayRight)
-        const gy = Math.abs(gray - grayBelow)
-        if (gx + gy > 30) edgeCount++
-      }
-    }
-
-    const totalPixels = (cw - 2) * (ch - 2)
-    const edgeDensity = edgeCount / totalPixels
-
-    // A blank wall/hand has ~2-5% edges. A document with text has ~12-30%+
-    return edgeDensity > 0.12
-  }
-
-  const stopAutoScan = () => {
-    autoScanActiveRef.current = false
-    if (autoScanTimerRef.current) {
-      clearTimeout(autoScanTimerRef.current)
-      autoScanTimerRef.current = null
-    }
-  }
-
-  const startAutoScan = () => {
-    autoScanActiveRef.current = true
-    consecutiveDetectionsRef.current = 0
-    setAutoScanStatus('scanning')
-    runDetectionLoop()
-  }
-
-  // Stable detection loop — requires multiple consecutive detections before capturing
-  const runDetectionLoop = () => {
-    if (!autoScanActiveRef.current) return
-    autoScanTimerRef.current = setTimeout(async () => {
-      if (!autoScanActiveRef.current) return
-
-      // Phase 1: Quick local check
-      const hasDocument = detectDocumentInFrame()
-
-      if (!hasDocument) {
-        // Nothing visible — reset counter and keep scanning
-        consecutiveDetectionsRef.current = 0
-        setAutoScanStatus('scanning')
-        runDetectionLoop()
-        return
-      }
-
-      // Document detected — increment consecutive counter
-      consecutiveDetectionsRef.current++
-
-      if (consecutiveDetectionsRef.current < REQUIRED_DETECTIONS) {
-        // Not stable yet — keep checking (show progress to user)
-        setAutoScanStatus('scanning')
-        runDetectionLoop()
-        return
-      }
-
-      // Phase 2: Stable document confirmed! Capture full-res and analyze
-      consecutiveDetectionsRef.current = 0
-      const video = cameraVideoRef.current
-      const canvas = cameraCanvasRef.current
-      if (!video || !canvas) { runDetectionLoop(); return }
-      canvas.width = video.videoWidth
-      canvas.height = video.videoHeight
-      const ctx = canvas.getContext('2d')
-      if (!ctx) { runDetectionLoop(); return }
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-      const base64 = canvas.toDataURL('image/jpeg', 0.92)
-
-      // Keep camera open — show analyzing status
-      setAutoScanStatus('analyzing')
-      stopAutoScan()
-
-      try {
-        const res = await window.electronAPI.scanOrdonnance(base64)
-
-        if (res.data && !res.error) {
-          const d = res.data
-          const hasVL = !!(d.vlRightEyeSphere || d.vlLeftEyeSphere || d.vlRightEyeCylinder || d.vlLeftEyeCylinder)
-          const hasVP = !!(d.vpRightEyeSphere || d.vpLeftEyeSphere || d.vpRightEyeCylinder || d.vpLeftEyeCylinder || d.vpRightEyeAddition || d.vpLeftEyeAddition)
-
-          if (hasVL || hasVP) {
-            // Success! Fill form and close camera
-            setAutoScanStatus('found')
-            setShowNewRxForm(true)
-            setNewRxHasVL(hasVL)
-            setNewRxHasVP(hasVP)
-            if (hasVL) {
-              setNewRxVLRightSph(d.vlRightEyeSphere || '0.00')
-              setNewRxVLRightCyl(d.vlRightEyeCylinder || '0.00')
-              setNewRxVLRightAxis(d.vlRightEyeAxis || '')
-              setNewRxVLLeftSph(d.vlLeftEyeSphere || '0.00')
-              setNewRxVLLeftCyl(d.vlLeftEyeCylinder || '0.00')
-              setNewRxVLLeftAxis(d.vlLeftEyeAxis || '')
-            }
-            if (hasVP) {
-              setNewRxVPRightSph(d.vpRightEyeSphere || '0.00')
-              setNewRxVPRightCyl(d.vpRightEyeCylinder || '0.00')
-              setNewRxVPRightAxis(d.vpRightEyeAxis || '')
-              setNewRxVPRightAdd(d.vpRightEyeAddition || '')
-              setNewRxVPLeftSph(d.vpLeftEyeSphere || '0.00')
-              setNewRxVPLeftCyl(d.vpLeftEyeCylinder || '0.00')
-              setNewRxVPLeftAxis(d.vpLeftEyeAxis || '')
-              setNewRxVPLeftAdd(d.vpLeftEyeAddition || '')
-            }
-            if (d.pupillaryDistance) setNewRxPD(d.pupillaryDistance)
-            toast.success('Ordonnance détectée automatiquement !', {
-              description: `${hasVL ? 'VL' : ''}${hasVL && hasVP ? ' + ' : ''}${hasVP ? 'VP' : ''} détectés. Vérifiez les valeurs.`,
-            })
-            // Close camera after brief visual feedback
-            setTimeout(() => closeCameraModal(), 800)
-            return
-          }
-        }
-        // AI didn't find prescription — resume scanning, don't close camera
-        toast.warning('Pas d\'ordonnance détectée — repositionnez le document.')
-        autoScanActiveRef.current = true
-        setAutoScanStatus('scanning')
-        runDetectionLoop()
-      } catch {
-        toast.error('Erreur lors de l\'analyse. Réessayez.')
-        autoScanActiveRef.current = true
-        setAutoScanStatus('scanning')
-        runDetectionLoop()
-      }
-    }, 600)
-  }
+  // ── Live Camera Scanner (Manual Capture Only) ─────────────────────────
 
   const openCameraModal = async () => {
     setShowCameraModal(true)
-    setAutoScanStatus('idle')
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
@@ -909,7 +733,6 @@ export default function CreateOrderPage() {
           cameraVideoRef.current.srcObject = stream
           cameraVideoRef.current.play()
         }
-        startAutoScan()
       }, 500)
     } catch (err: any) {
       toast.error('Impossible d\'accéder à la caméra: ' + (err.message || 'Permission refusée'))
@@ -918,17 +741,14 @@ export default function CreateOrderPage() {
   }
 
   const closeCameraModal = () => {
-    stopAutoScan()
     if (cameraStreamRef.current) {
       cameraStreamRef.current.getTracks().forEach(t => t.stop())
       cameraStreamRef.current = null
     }
-    setAutoScanStatus('idle')
     setShowCameraModal(false)
   }
 
   const captureAndScan = async () => {
-    stopAutoScan()
     const video = cameraVideoRef.current
     const canvas = cameraCanvasRef.current
     if (!video || !canvas) return
@@ -1999,33 +1819,6 @@ export default function CreateOrderPage() {
       {/* ── Live Camera Scanner Modal ─────────────────────────────────────── */}
       {showCameraModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
-          <style>{`
-            @keyframes scanLine {
-              0% { top: 15%; }
-              50% { top: 75%; }
-              100% { top: 15%; }
-            }
-            .scan-line-anim {
-              animation: scanLine 2.5s ease-in-out infinite;
-            }
-            @keyframes pulseGlow {
-              0%, 100% { box-shadow: 0 0 8px rgba(16,185,129,0.3); }
-              50% { box-shadow: 0 0 20px rgba(16,185,129,0.6); }
-            }
-            .scan-frame-active {
-              animation: pulseGlow 2s ease-in-out infinite;
-            }
-            @keyframes foundFlash {
-              0% { border-color: rgba(16,185,129,0.6); }
-              50% { border-color: rgba(16,185,129,1); }
-              100% { border-color: rgba(16,185,129,0.6); }
-            }
-            .scan-frame-found {
-              animation: foundFlash 0.4s ease-in-out 3;
-              border-style: solid !important;
-              border-color: #10b981 !important;
-            }
-          `}</style>
           <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden">
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-gradient-to-r from-emerald-50 to-teal-50 dark:from-emerald-900/20 dark:to-teal-900/20">
@@ -2033,30 +1826,9 @@ export default function CreateOrderPage() {
                 <Video className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 <span className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">Scanner Live — Ordonnance</span>
               </div>
-              <div className="flex items-center gap-2">
-                {/* Auto-scan status badge */}
-                {autoScanStatus === 'scanning' && (
-                  <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    Recherche auto...
-                  </span>
-                )}
-                {autoScanStatus === 'analyzing' && (
-                  <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Analyse en cours...
-                  </span>
-                )}
-                {autoScanStatus === 'found' && (
-                  <span className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">
-                    <Check className="h-3 w-3" />
-                    Ordonnance détectée !
-                  </span>
-                )}
-                <button onClick={closeCameraModal} className="p-1.5 hover:bg-white/60 dark:hover:bg-gray-800 rounded-lg transition-colors">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
+              <button onClick={closeCameraModal} className="p-1.5 hover:bg-white/60 dark:hover:bg-gray-800 rounded-lg transition-colors">
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
             {/* Video Preview */}
@@ -2068,34 +1840,15 @@ export default function CreateOrderPage() {
                 muted
                 className="w-full max-h-[60vh] object-contain"
               />
-              {/* Scanning overlay */}
+              {/* Guide overlay */}
               <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
                 <div
-                  className={`border-2 border-dashed rounded-lg relative ${
-                    autoScanStatus === 'found'
-                      ? 'scan-frame-found'
-                      : autoScanStatus === 'analyzing'
-                      ? 'border-amber-400/80 scan-frame-active'
-                      : 'border-emerald-400/60 scan-frame-active'
-                  }`}
+                  className="border-2 border-dashed rounded-lg relative border-emerald-400/60"
                   style={{ width: '80%', height: '70%' }}
                 >
-                  {/* Animated scan line */}
-                  {(autoScanStatus === 'scanning' || autoScanStatus === 'analyzing') && (
-                    <div
-                      className="scan-line-anim absolute left-0 right-0 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent"
-                      style={{ position: 'absolute' }}
-                    />
-                  )}
                   {/* Status label */}
-                  <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1.5">
-                    {autoScanStatus === 'found' ? (
-                      <><Check className="h-3 w-3 text-emerald-400" /> Ordonnance trouvée !</>
-                    ) : autoScanStatus === 'analyzing' ? (
-                      <><Loader2 className="h-3 w-3 animate-spin text-amber-400" /> Analyse de l'image...</>
-                    ) : (
-                      <>Placez l'ordonnance dans le cadre</>
-                    )}
+                  <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs px-3 py-1 rounded-full">
+                    Placez l'ordonnance dans le cadre
                   </div>
                   {/* Corner decorations */}
                   <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-emerald-400 rounded-tl" />
@@ -2109,7 +1862,7 @@ export default function CreateOrderPage() {
             {/* Actions */}
             <div className="flex items-center justify-between px-5 py-3 bg-gray-50 dark:bg-gray-800/50">
               <p className="text-xs text-muted-foreground">
-                Détection automatique active — ou capturez manuellement
+                Capturez l'ordonnance manuellement
               </p>
               <div className="flex items-center gap-2">
                 <button
@@ -2120,11 +1873,11 @@ export default function CreateOrderPage() {
                 </button>
                 <button
                   onClick={captureAndScan}
-                  disabled={isScanning || autoScanStatus === 'analyzing'}
+                  disabled={isScanning}
                   className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white shadow-lg shadow-emerald-500/25 transition-all duration-200 disabled:opacity-60"
                 >
                   <Camera className="h-3.5 w-3.5" />
-                  Capture manuelle
+                  Capturer
                 </button>
               </div>
             </div>
