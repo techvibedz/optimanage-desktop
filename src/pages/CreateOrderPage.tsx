@@ -510,7 +510,7 @@ export default function CreateOrderPage() {
   useEffect(() => {
     if (!user?.id) return
     Promise.all([
-      window.electronAPI.getCustomers({ userId: user.id, limit: 500 }),
+      window.electronAPI.getCustomers({ userId: user.id }),
       window.electronAPI.getFrames({ userId: user.id }),
       window.electronAPI.getLensTypes({ userId: user.id }),
       window.electronAPI.getContactLenses({ userId: user.id }),
@@ -1563,38 +1563,6 @@ export default function CreateOrderPage() {
             </div>
           </div>
 
-          {/* 8. Notes & Dates */}
-          <div className="bg-white dark:bg-gray-800 rounded-xl border border-border p-5">
-            <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 text-xs flex items-center justify-center font-bold">8</span>
-              {t('orders.notesAndDates')}
-            </h3>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-muted-foreground mb-1 block">{t('orders.readyDate')}</label>
-                <input type="date" value={readyDate} onChange={e => setReadyDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background" />
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                  {readyDateOptions.map(opt => {
-                    const target = new Date(); target.setDate(target.getDate() + opt.days)
-                    const targetStr = target.toISOString().split('T')[0]
-                    const isActive = readyDate === targetStr
-                    return (
-                      <button key={opt.days} type="button" onClick={() => setReadyDays(opt.days)}
-                        className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${isActive ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/50 border-border hover:bg-muted'}`}>
-                        {opt.label}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-              <div>
-                <label className="text-sm font-medium text-muted-foreground mb-1 block">{t('common.notes')}</label>
-                <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder={t('orders.additionalNotes')}
-                  className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background resize-none" />
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* ─── Right Column: Price Summary (Sticky) ───────────────────── */}
@@ -1680,6 +1648,33 @@ export default function CreateOrderPage() {
                   <span className="font-bold text-xl text-green-700 dark:text-green-400">{balanceDue.toLocaleString()} {t('orders.currency')}</span>
                 </div>
                 <div className="text-xs text-green-600 dark:text-green-400 mt-1">{t('orders.toBePaidUponPickup')}</div>
+              </div>
+
+              {/* Notes & Dates */}
+              <div className="mt-4 space-y-3">
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground mb-1 block">{t('orders.readyDate')}</label>
+                  <input type="date" value={readyDate} onChange={e => setReadyDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background" />
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {readyDateOptions.map(opt => {
+                      const target = new Date(); target.setDate(target.getDate() + opt.days)
+                      const targetStr = target.toISOString().split('T')[0]
+                      const isActive = readyDate === targetStr
+                      return (
+                        <button key={opt.days} type="button" onClick={() => setReadyDays(opt.days)}
+                          className={`px-2.5 py-1 text-xs rounded-md border transition-colors ${isActive ? 'bg-primary text-primary-foreground border-primary' : 'bg-muted/50 border-border hover:bg-muted'}`}>
+                          {opt.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground mb-1 block">{t('common.notes')}</label>
+                  <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder={t('orders.additionalNotes')}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background resize-none" />
+                </div>
               </div>
 
               {/* Action Buttons */}

@@ -19,7 +19,7 @@ export default function CustomersPage() {
   const fetchCustomers = async () => {
     if (!user?.id) return
     setLoading(true)
-    const result = await window.electronAPI.getCustomers({ userId: user.id, query: search, limit: 100 })
+    const result = await window.electronAPI.getCustomers({ userId: user.id, query: search })
     if (result.data) setCustomers(result.data)
     setLoading(false)
   }

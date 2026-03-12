@@ -276,7 +276,7 @@ function registerIpcHandlers() {
         where,
         select: { id: true, firstName: true, lastName: true, email: true, phone: true, createdAt: true, updatedAt: true },
         orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
-        take: params.limit || 50,
+        ...(params.limit ? { take: params.limit } : {}),
       })
       return { data }
     } catch (err: any) {
@@ -304,7 +304,18 @@ function registerIpcHandlers() {
 
   ipcMain.handle('customers:update', async (_e, id: string, updates: any) => {
     try {
-      const data = await prisma.customer.update({ where: { id }, data: updates })
+      // Sanitize optional fields — convert empty strings to null
+      const clean: any = { ...updates }
+      for (const key of ['email', 'phone', 'address', 'notes', 'insuranceProvider', 'insurancePolicyNumber', 'insuranceCoverageDetails']) {
+        if (clean[key] === '') clean[key] = null
+      }
+      // Convert dateOfBirth string to Date or null
+      if (clean.dateOfBirth === '' || clean.dateOfBirth === undefined) {
+        clean.dateOfBirth = null
+      } else if (typeof clean.dateOfBirth === 'string') {
+        clean.dateOfBirth = new Date(clean.dateOfBirth)
+      }
+      const data = await prisma.customer.update({ where: { id }, data: clean })
       return { data }
     } catch (err: any) { return { error: err.message } }
   })
@@ -673,7 +684,7 @@ function registerIpcHandlers() {
       }
 
       const offset = (page - 1) * limit
-      const [total, payments] = await Promise.all([
+      const [total, payments, agg] = await Promise.all([
         prisma.payment.count({ where }),
         prisma.payment.findMany({
           where,
@@ -682,9 +693,10 @@ function registerIpcHandlers() {
           skip: offset,
           take: limit,
         }),
+        prisma.payment.aggregate({ where, _sum: { amount: true } }),
       ])
 
-      return { data: { payments, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
+      return { data: { payments, pagination: { total, pages: Math.ceil(total / limit), page, limit }, totalAmount: agg._sum.amount || 0 } }
     } catch (err: any) {
       return { error: err.message }
     }

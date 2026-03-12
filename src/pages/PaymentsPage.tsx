@@ -16,6 +16,8 @@ export default function PaymentsPage() {
   const [totalPages, setTotalPages] = useState(1)
   const [methodFilter, setMethodFilter] = useState<string>('')
   const [dateFilter, setDateFilter] = useState<string>('all')
+  const [totalCount, setTotalCount] = useState(0)
+  const [totalAmount, setTotalAmount] = useState(0)
 
   // Expenses state
   const [expenses, setExpenses] = useState<any[]>([]);
@@ -56,6 +58,8 @@ export default function PaymentsPage() {
     if (result.data) {
       setPayments(result.data.payments || [])
       setTotalPages(result.data.pagination?.pages || 1)
+      setTotalCount(result.data.pagination?.total || 0)
+      setTotalAmount(result.data.totalAmount || 0)
     }
     setLoading(false)
   }
@@ -163,9 +167,8 @@ export default function PaymentsPage() {
     fetchPayments()
   }
 
-  // Stats computed from current page — expenses subtract from revenue
+  // Stats — use server-side aggregate for totals across all filtered records
   const stats = useMemo(() => {
-    const totalPayments = payments.reduce((sum, p) => sum + (p.amount || 0), 0)
     const totalExpenses = expenses.reduce((sum: number, e: any) => sum + (e.amount || 0), 0)
     const todayStr = new Date().toDateString()
     const todayPayments = payments.filter(p => {
@@ -178,12 +181,12 @@ export default function PaymentsPage() {
       return new Date(e.date).toDateString() === todayStr
     }).reduce((sum: number, e: any) => sum + (e.amount || 0), 0)
     return {
-      count: payments.length,
-      total: totalPayments - totalExpenses,
+      count: totalCount,
+      total: totalAmount - totalExpenses,
       todayCount: todayPayments.length,
       todayTotal: todayPayTotal - todayExpenses,
     }
-  }, [payments, expenses])
+  }, [payments, expenses, totalCount, totalAmount])
 
   const getMethodBadgeClass = (method: string) => {
     switch (method?.toLowerCase()) {
