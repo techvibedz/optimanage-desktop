@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, net, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import bcrypt from 'bcryptjs'
 import path from 'node:path'
@@ -150,6 +150,27 @@ app.whenReady().then(() => {
       })
     }, 5000)
   }
+
+  // ── Internet Connectivity Monitor ──────────────────────────────────────────
+  // Poll net.isOnline() every 3s and push changes to the renderer
+  let lastOnlineStatus = true
+  const checkConnectivity = () => {
+    try {
+      const online = net.isOnline()
+      if (online !== lastOnlineStatus) {
+        lastOnlineStatus = online
+        mainWindow?.webContents.send('connectivity:status', online)
+        console.log(`[Connectivity] Status changed: ${online ? 'ONLINE' : 'OFFLINE'}`)
+      }
+    } catch { /* ignore */ }
+  }
+  setInterval(checkConnectivity, 3000)
+  // Initial check after a short delay (let the window load first)
+  setTimeout(checkConnectivity, 1000)
+
+  ipcMain.handle('connectivity:check', () => {
+    try { return net.isOnline() } catch { return true }
+  })
 
   // Updater IPC handlers — registered always (stubs in dev, real in production)
   ipcMain.handle('updater:check', async () => {
@@ -501,10 +522,25 @@ function registerIpcHandlers() {
   // ── Prescriptions ─────────────────────────────────────────────────────────
   ipcMain.handle('prescriptions:list', async (_e, params: any) => {
     try {
-      const { userId, customerId, page = 1, limit = 10 } = params
+      const { userId, customerId, search, page = 1, limit = 10 } = params
       const where: any = {}
       if (customerId) where.customerId = customerId
       else if (userId) where.customer = { userId }
+
+      if (search?.trim()) {
+        const s = search.trim()
+        const searchFilter = {
+          OR: [
+            { doctorName: { contains: s, mode: 'insensitive' } },
+            { customer: { firstName: { contains: s, mode: 'insensitive' } } },
+            { customer: { lastName: { contains: s, mode: 'insensitive' } } },
+          ]
+        }
+        // Combine with existing where using AND
+        const existing = { ...where }
+        Object.keys(where).forEach(k => delete where[k])
+        where.AND = [existing, searchFilter]
+      }
 
       const offset = (page - 1) * limit
       const [total, prescriptions] = await Promise.all([
@@ -522,6 +558,17 @@ function registerIpcHandlers() {
     } catch (err: any) {
       return { error: err.message }
     }
+  })
+
+  ipcMain.handle('prescriptions:get', async (_e, id: string) => {
+    try {
+      const data = await prisma.prescription.findUnique({
+        where: { id },
+        include: { customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } }, orders: { select: { id: true, orderNumber: true, createdAt: true, status: true } } },
+      })
+      if (!data) return { error: 'Prescription not found' }
+      return { data }
+    } catch (err: any) { return { error: err.message } }
   })
 
   ipcMain.handle('prescriptions:create', async (_e, prescription: any) => {
@@ -911,48 +958,57 @@ function registerIpcHandlers() {
         ...(startDate ? { date: { gte: startDate, lte: endDate } } : {}),
       }
 
-      // Batch 1: Counts
-      const [totalCustomers, filteredOrders, totalPrescriptions] = await Promise.all([
-        prisma.customer.count({ where: { userId } }),
-        prisma.order.count({ where: combinedDateFilter }),
-        prisma.prescription.count({ where: { customer: { userId } } }),
-      ])
-
-      // Batch 2: Financial aggregates
-      const [totalPayments, revenueBreakdown, totalExpenses] = await Promise.all([
-        prisma.payment.aggregate({ where: paymentWhere, _sum: { amount: true } }),
-        prisma.payment.groupBy({ by: ['paymentMethod'], where: paymentWhere, _sum: { amount: true } }),
-        prisma.expense.aggregate({ where: expenseWhere, _sum: { amount: true } }),
-      ])
-
-      // Batch 3: Previous period for growth calculation
-      let previousRevenueAmount = 0
-      let previousExpensesAmount = 0
-
+      // Build previous period filters for growth calculation
+      let prevPaymentWhere: any = null
+      let prevExpenseWhere: any = null
+      let prevOrderWhere: any = null
+      let prevCustomerWhere: any = null
+      let prevPrescriptionWhere: any = null
       if (startDate) {
         const periodLength = endDate.getTime() - startDate.getTime()
         const previousStart = new Date(startDate.getTime() - periodLength)
         const previousEnd = new Date(startDate.getTime())
-
-        const [prevRevenue, prevExpenses] = await Promise.all([
-          prisma.payment.aggregate({
-            where: { AND: [{ OR: [{ order: { userId } }, { userId }] }, { paymentDate: { gte: previousStart, lt: previousEnd } }] },
-            _sum: { amount: true },
-          }),
-          prisma.expense.aggregate({
-            where: { userId, date: { gte: previousStart, lt: previousEnd } },
-            _sum: { amount: true },
-          }),
-        ])
-        previousRevenueAmount = prevRevenue._sum.amount || 0
-        previousExpensesAmount = prevExpenses._sum.amount || 0
+        prevPaymentWhere = { AND: [{ OR: [{ order: { userId } }, { userId }] }, { paymentDate: { gte: previousStart, lt: previousEnd } }] }
+        prevExpenseWhere = { userId, date: { gte: previousStart, lt: previousEnd } }
+        prevOrderWhere = { AND: [{ userId }, { createdAt: { gte: previousStart, lt: previousEnd } }] }
+        prevCustomerWhere = { userId, createdAt: { gte: previousStart, lt: previousEnd } }
+        prevPrescriptionWhere = { customer: { userId }, createdAt: { gte: previousStart, lt: previousEnd } }
       }
 
-      // Order financial stats
-      const orderStats = await prisma.order.aggregate({
-        where: combinedDateFilter,
-        _sum: { totalPrice: true, depositAmount: true },
-      })
+      // Single batch: ALL queries in parallel
+      const queries: Promise<any>[] = [
+        prisma.customer.count({ where: { userId } }),                                              // 0
+        prisma.order.count({ where: combinedDateFilter }),                                          // 1
+        prisma.prescription.count({ where: { customer: { userId } } }),                            // 2
+        prisma.payment.aggregate({ where: paymentWhere, _sum: { amount: true } }),                 // 3
+        prisma.payment.groupBy({ by: ['paymentMethod'], where: paymentWhere, _sum: { amount: true } }), // 4
+        prisma.expense.aggregate({ where: expenseWhere, _sum: { amount: true } }),                 // 5
+        prisma.order.aggregate({ where: combinedDateFilter, _sum: { totalPrice: true, depositAmount: true } }), // 6
+      ]
+      // Previous period queries (only when date-filtered)
+      if (startDate) {
+        queries.push(
+          prisma.payment.aggregate({ where: prevPaymentWhere, _sum: { amount: true } }),           // 7
+          prisma.expense.aggregate({ where: prevExpenseWhere, _sum: { amount: true } }),            // 8
+          prisma.order.count({ where: prevOrderWhere }),                                            // 9
+          prisma.customer.count({ where: prevCustomerWhere }),                                      // 10
+          prisma.prescription.count({ where: prevPrescriptionWhere }),                              // 11
+        )
+      }
+
+      const results = await Promise.all(queries)
+      const totalCustomers = results[0]
+      const filteredOrders = results[1]
+      const totalPrescriptions = results[2]
+      const totalPayments = results[3]
+      const revenueBreakdown = results[4]
+      const totalExpenses = results[5]
+      const orderStats = results[6]
+      const previousRevenueAmount = startDate ? (results[7]._sum.amount || 0) : 0
+      const previousExpensesAmount = startDate ? (results[8]._sum.amount || 0) : 0
+      const prevOrders = startDate ? results[9] : 0
+      const prevCustomers = startDate ? results[10] : 0
+      const prevPrescriptions = startDate ? results[11] : 0
 
       // Process results — revenue = payments minus expenses (matches payments page)
       const revenueAmount = totalPayments._sum.amount || 0
@@ -965,6 +1021,12 @@ function registerIpcHandlers() {
       const revenueGrowth = previousNetRevenue > 0
         ? Math.round(((netRevenue - previousNetRevenue) / previousNetRevenue) * 100)
         : netRevenue > 0 ? 100 : 0
+
+      const calcGrowth = (current: number, previous: number) =>
+        previous > 0 ? Math.round(((current - previous) / previous) * 100) : current > 0 ? 100 : 0
+      const customerGrowth = startDate ? calcGrowth(totalCustomers, prevCustomers) : 0
+      const orderGrowth = startDate ? calcGrowth(filteredOrders, prevOrders) : 0
+      const prescriptionGrowth = startDate ? calcGrowth(totalPrescriptions, prevPrescriptions) : 0
 
       const orderAmountsTotal = orderStats._sum.totalPrice || 0
       const depositsTotal = orderStats._sum.depositAmount || 0
@@ -982,6 +1044,9 @@ function registerIpcHandlers() {
           totalPrescriptions,
           totalRevenue: formattedRevenue,
           totalPayments: formattedPayments,
+          customerGrowth,
+          orderGrowth,
+          prescriptionGrowth,
           revenueGrowth,
           paymentMethodBreakdown,
           revenueAnalytics: {

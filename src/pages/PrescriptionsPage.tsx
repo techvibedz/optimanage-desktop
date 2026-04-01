@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
 import { toast } from 'sonner'
-import { Plus, Search, FileText, Trash2 } from 'lucide-react'
+import { Plus, Search, FileText, Trash2, Eye } from 'lucide-react'
 
 export default function PrescriptionsPage() {
   const { t } = useTranslation()
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [prescriptions, setPrescriptions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [showForm, setShowForm] = useState(false)
@@ -22,12 +25,12 @@ export default function PrescriptionsPage() {
     pdRight: '', pdLeft: '', notes: '',
   })
 
-  useEffect(() => { fetchPrescriptions() }, [page])
+  useEffect(() => { fetchPrescriptions() }, [page, search])
 
   const fetchPrescriptions = async () => {
     if (!user?.id) return
     setLoading(true)
-    const result = await window.electronAPI.getPrescriptions({ userId: user.id, page, limit: 10 })
+    const result = await window.electronAPI.getPrescriptions({ userId: user.id, page, limit: 10, search })
     if (result.data) {
       setPrescriptions(result.data.prescriptions || [])
       setTotalPages(result.data.pagination?.pages || 1)
@@ -100,6 +103,16 @@ export default function PrescriptionsPage() {
           <button onClick={handleNew} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 text-sm font-medium">
             <Plus className="h-4 w-4" /> {t('prescriptions.addPrescription')}
           </button>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="toolbar">
+        <div className="toolbar-search">
+          <Search className="h-4 w-4 text-muted-foreground" />
+          <input type="text" placeholder={t('prescriptions.searchPlaceholder')} value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1) }}
+            className="flex-1 px-3 py-2 bg-white dark:bg-gray-800 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
         </div>
       </div>
 
@@ -181,16 +194,21 @@ export default function PrescriptionsPage() {
               <thead><tr><th>{t('common.customer')}</th><th>{t('prescriptions.doctor')}</th><th>{t('prescriptions.examinationDate')}</th><th>VL OD</th><th>VL OS</th><th>{t('common.actions')}</th></tr></thead>
               <tbody>
                 {prescriptions.map((p: any) => (
-                  <tr key={p.id}>
+                  <tr key={p.id} onClick={() => navigate(`/prescriptions/${p.id}`)} className="cursor-pointer hover:bg-muted/50 transition-colors">
                     <td className="font-medium">{p.customer ? `${p.customer.firstName} ${p.customer.lastName}` : '-'}</td>
-                    <td>{p.doctor || '-'}</td>
+                    <td>{p.doctor || p.doctorName || '-'}</td>
                     <td>{p.examinationDate ? new Date(p.examinationDate).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}</td>
-                    <td className="text-xs">{p.vlOdSphere || '-'}/{p.vlOdCylinder || '-'}x{p.vlOdAxis || '-'}</td>
-                    <td className="text-xs">{p.vlOsSphere || '-'}/{p.vlOsCylinder || '-'}x{p.vlOsAxis || '-'}</td>
+                    <td className="text-xs font-mono">{p.vlRightEyeSphere != null ? `${p.vlRightEyeSphere}/${p.vlRightEyeCylinder ?? '-'}x${p.vlRightEyeAxis ?? '-'}` : (p.vlOdSphere || '-') + '/' + (p.vlOdCylinder || '-') + 'x' + (p.vlOdAxis || '-')}</td>
+                    <td className="text-xs font-mono">{p.vlLeftEyeSphere != null ? `${p.vlLeftEyeSphere}/${p.vlLeftEyeCylinder ?? '-'}x${p.vlLeftEyeAxis ?? '-'}` : (p.vlOsSphere || '-') + '/' + (p.vlOsCylinder || '-') + 'x' + (p.vlOsAxis || '-')}</td>
                     <td>
-                      <button onClick={() => handleDelete(p.id)} className="p-1.5 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30" title={t('common.delete')}>
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button onClick={(e) => { e.stopPropagation(); navigate(`/prescriptions/${p.id}`) }} className="p-1.5 rounded-md hover:bg-primary/10" title={t('common.view')}>
+                          <Eye className="h-4 w-4 text-primary" />
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); handleDelete(p.id) }} className="p-1.5 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30" title={t('common.delete')}>
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

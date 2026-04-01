@@ -289,6 +289,14 @@ export const translations: Record<Language, Translations> = {
     'prescriptions.created': 'Prescription created successfully',
     'prescriptions.addDescription': 'VP is auto-calculated from VL + ADD',
     'prescriptions.enableOneType': 'Enable at least one prescription type (VL or VP)',
+    'prescriptions.prescriptionDetails': 'Prescription Details',
+    'prescriptions.patientInfo': 'Patient Information',
+    'prescriptions.doctorAndDates': 'Doctor & Dates',
+    'prescriptions.license': 'License',
+    'prescriptions.pupillaryDistance': 'Pupillary Distance',
+    'prescriptions.readingDistance': 'Reading Distance',
+    'prescriptions.relatedOrders': 'Related Orders',
+    'prescriptions.print': 'Print',
 
     // Inventory
     'inventory.title': 'Inventory',
@@ -741,6 +749,14 @@ export const translations: Record<Language, Translations> = {
     'prescriptions.created': 'Ordonnance cr\u00e9\u00e9e avec succ\u00e8s',
     'prescriptions.addDescription': 'VP est auto-calcul\u00e9 \u00e0 partir de VL + ADD',
     'prescriptions.enableOneType': 'Activez au moins un type (VL ou VP)',
+    'prescriptions.prescriptionDetails': "Détails de l'Ordonnance",
+    'prescriptions.patientInfo': 'Informations Patient',
+    'prescriptions.doctorAndDates': 'Médecin & Dates',
+    'prescriptions.license': 'Licence',
+    'prescriptions.pupillaryDistance': 'Écart Pupillaire',
+    'prescriptions.readingDistance': 'Distance de Lecture',
+    'prescriptions.relatedOrders': 'Commandes Associées',
+    'prescriptions.print': 'Imprimer',
 
     // Inventory
     'inventory.title': 'Inventaire',

@@ -41,6 +41,7 @@ export interface ElectronAPI {
 
   // Prescriptions
   getPrescriptions: (params: any) => Promise<{ data?: any; error?: string }>
+  getPrescription: (id: string) => Promise<{ data?: any; error?: string }>
   createPrescription: (prescription: any) => Promise<{ data?: any; error?: string }>
   updatePrescription: (id: string, updates: any) => Promise<{ data?: any; error?: string }>
   deletePrescription: (id: string) => Promise<{ success?: boolean; error?: string }>
@@ -94,10 +95,9 @@ export interface ElectronAPI {
   // AI
   scanOrdonnance: (imageBase64: string) => Promise<{ data?: ParsedPrescriptionData; error?: string }>
 
-  // Sync (offline queue)
-  forceSync: () => Promise<{ processed: number; remaining: number }>
-  getSyncStatus: () => Promise<{ isOnline: boolean; pendingItems: number }>
-  onSyncStatus: (callback: (status: SyncStatus) => void) => () => void
+  // Connectivity
+  checkConnectivity: () => Promise<boolean>
+  onConnectivityStatus: (callback: (online: boolean) => void) => () => void
 
   // Updater
   checkUpdate: () => Promise<{ success?: boolean; error?: string }>

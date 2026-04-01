@@ -47,7 +47,11 @@ export default function DashboardPage() {
   const [recentOrders, setRecentOrders] = useState<any[]>([])
   const [activities, setActivities] = useState<any[]>([])
 
-  useEffect(() => { fetchStats(activeFilter); fetchRecentData() }, [])
+  useEffect(() => {
+    // Fire both in parallel — no sequential awaiting
+    fetchStats(activeFilter)
+    fetchRecentData()
+  }, [])
 
   const fetchRecentData = async () => {
     if (!user?.id) return
@@ -129,7 +133,7 @@ export default function DashboardPage() {
             className="p-2.5 rounded-xl bg-white dark:bg-gray-800 border border-border/50 hover:bg-muted transition-all" title={showPriceStats ? 'Hide amounts' : 'Show amounts'}>
             {showPriceStats ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
-          <button onClick={() => fetchStats(activeFilter)}
+          <button onClick={() => { fetchStats(activeFilter); fetchRecentData() }}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-gray-800 border border-border/50 hover:bg-muted transition-all text-sm font-medium ${loading ? 'opacity-60 pointer-events-none' : ''}`}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             {t('dashboard.refreshData') || 'Refresh'}

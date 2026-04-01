@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Prescriptions
   getPrescriptions: (params: any) => ipcRenderer.invoke('prescriptions:list', params),
+  getPrescription: (id: string) => ipcRenderer.invoke('prescriptions:get', id),
   createPrescription: (prescription: any) => ipcRenderer.invoke('prescriptions:create', prescription),
   updatePrescription: (id: string, updates: any) => ipcRenderer.invoke('prescriptions:update', id, updates),
   deletePrescription: (id: string) => ipcRenderer.invoke('prescriptions:delete', id),
@@ -77,6 +78,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // AI
   scanOrdonnance: (imageBase64: string) => ipcRenderer.invoke('ai:scanOrdonnance', imageBase64),
+
+  // Connectivity
+  checkConnectivity: () => ipcRenderer.invoke('connectivity:check'),
+  onConnectivityStatus: (callback: (online: boolean) => void) => {
+    const handler = (_event: any, online: boolean) => callback(online)
+    ipcRenderer.on('connectivity:status', handler)
+    return () => { ipcRenderer.removeListener('connectivity:status', handler) }
+  },
 
   // Updater
   checkUpdate: () => ipcRenderer.invoke('updater:check'),

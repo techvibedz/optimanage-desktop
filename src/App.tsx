@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from '@/lib/auth-context'
 import { SettingsProvider } from '@/lib/settings-context'
 import { Toaster } from 'sonner'
 import AppLayout from '@/components/layout/AppLayout'
+import NoInternetOverlay from '@/components/NoInternetOverlay'
 
 const LoginPage = lazy(() => import('@/pages/LoginPage'))
 const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
@@ -20,6 +21,7 @@ const QuickSalePage = lazy(() => import('@/pages/QuickSalePage'))
 const CreateOrderPage = lazy(() => import('@/pages/CreateOrderPage'))
 const OrderDetailsPage = lazy(() => import('@/pages/OrderDetailsPage'))
 const LensSummaryPage = lazy(() => import('@/pages/LensSummaryPage'))
+const PrescriptionDetailsPage = lazy(() => import('@/pages/PrescriptionDetailsPage'))
 const PrintFacturePage = lazy(() => import('@/pages/PrintFacturePage'))
 const PrintOrderSlipPage = lazy(() => import('@/pages/PrintOrderSlipPage'))
 const PrintReceiptPage = lazy(() => import('@/pages/PrintReceiptPage'))
@@ -74,6 +76,7 @@ function AppRoutes() {
           <Route path="/orders/new" element={<CreateOrderPage />} />
           <Route path="/orders/:id" element={<OrderDetailsPage />} />
           <Route path="/prescriptions" element={<PrescriptionsPage />} />
+          <Route path="/prescriptions/:id" element={<PrescriptionDetailsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
@@ -99,6 +102,7 @@ export default function App() {
       <SettingsProvider>
         <AppRoutes />
         <Toaster position="top-right" richColors closeButton />
+        <NoInternetOverlay />
       </SettingsProvider>
     </AuthProvider>
   )
