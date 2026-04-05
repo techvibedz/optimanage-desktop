@@ -340,12 +340,12 @@ export default function OrderSlip({ order }: OrderSlipProps) {
   }
 
   // ═══════ Full A5 Layout ═══════
-  // Atelier always gets more space (flex 3 ≈ 60%) since it has prescription + notes
-  // Client gets less space (flex 2 ≈ 40%) — header, lenses, ready date, footer only
+  // Atelier gets slightly more space (flex 5 ≈ 55%) since it has prescription + notes
+  // Client gets nearly equal space (flex 4 ≈ 45%) — header, lenses, ready date, footer
   return (
     <div style={{ width: '148mm', height: '210mm', margin: '0 auto', display: 'flex', flexDirection: 'column', overflow: 'hidden', paddingBottom: '3mm' }}>
-      {/* Top half — BON ATELIER (bigger) */}
-      <div style={{ flex: '3 1 0%', minHeight: 0, overflow: 'hidden' }}>
+      {/* Top half — BON ATELIER */}
+      <div style={{ flex: '5 1 0%', minHeight: 0, overflow: 'hidden' }}>
         <HalfPage label="BON ATELIER" showPrescription={true} showReadyDate={false} largeFooter={false} />
       </div>
 
@@ -356,8 +356,8 @@ export default function OrderSlip({ order }: OrderSlipProps) {
         <div style={{ flex: 1, borderTop: '1.5px dashed #000' }} />
       </div>
 
-      {/* Bottom half — BON CLIENT (smaller) */}
-      <div style={{ flex: '2 1 0%', minHeight: 0, overflow: 'hidden' }}>
+      {/* Bottom half — BON CLIENT */}
+      <div style={{ flex: '4 1 0%', minHeight: 0, overflow: 'hidden' }}>
         <HalfPage label="BON CLIENT" showPrescription={false} showReadyDate={true} largeFooter={false} />
       </div>
     </div>

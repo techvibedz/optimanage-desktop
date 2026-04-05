@@ -1,6 +1,15 @@
+import { Suspense } from 'react'
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import UpdateModal from './UpdateModal'
+
+function PageLoader() {
+  return (
+    <div className="flex items-center justify-center h-[60vh]">
+      <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+    </div>
+  )
+}
 
 export default function AppLayout() {
   return (
@@ -9,7 +18,9 @@ export default function AppLayout() {
         <Sidebar />
       </div>
       <main className="app-content">
-        <Outlet />
+        <Suspense fallback={<PageLoader />}>
+          <Outlet />
+        </Suspense>
       </main>
       <UpdateModal />
     </div>
