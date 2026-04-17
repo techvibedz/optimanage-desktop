@@ -251,6 +251,27 @@ let currentUser = loadSession()
 
 // ─── IPC Handlers (Prisma) ───────────────────────────────────────────────────
 
+/**
+ * Whitelist: picks only the allowed fields from an input object.
+ * Used by create/update handlers to strip unknown fields (id, createdAt,
+ * updatedAt, relations, etc.) that would otherwise cause Prisma
+ * "Unknown argument" errors when clients send the whole record back.
+ */
+function pickFields<T extends Record<string, any>>(input: any, allowed: readonly (keyof T)[]): Partial<T> {
+  if (!input || typeof input !== 'object') return {}
+  const out: any = {}
+  for (const key of allowed) {
+    if (input[key as string] !== undefined) out[key] = input[key as string]
+  }
+  return out
+}
+
+// Allowed fields per model (mirror the Prisma schema writable columns)
+const FRAME_FIELDS = ['brand', 'model', 'color', 'size', 'cost', 'sellingPrice', 'stock', 'userId'] as const
+const LENS_TYPE_FIELDS = ['name', 'category', 'material', 'index', 'baseCost', 'sellingPrice', 'stock', 'reorderThreshold', 'supplierName', 'supplierContact', 'userId'] as const
+const CONTACT_LENS_FIELDS = ['brand', 'model', 'price', 'userId'] as const
+const CUSTOMER_FIELDS = ['firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'address', 'insuranceProvider', 'insurancePolicyNumber', 'insuranceCoverageDetails', 'notes', 'userId'] as const
+
 function registerIpcHandlers() {
   // ── Auth ──────────────────────────────────────────────────────────────────
   ipcMain.handle('auth:login', async (_e, email: string, password: string) => {
@@ -316,7 +337,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('customers:create', async (_e, customer: any) => {
     try {
-      const data = await prisma.customer.create({ data: customer })
+      const data = await prisma.customer.create({ data: pickFields(customer, CUSTOMER_FIELDS) as any })
       return { data }
     } catch (err: any) {
       return { error: err.message }
@@ -325,14 +346,14 @@ function registerIpcHandlers() {
 
   ipcMain.handle('customers:update', async (_e, id: string, updates: any) => {
     try {
-      // Sanitize optional fields — convert empty strings to null
-      const clean: any = { ...updates }
+      // Whitelist + sanitize optional fields — convert empty strings to null
+      const clean: any = pickFields(updates, CUSTOMER_FIELDS)
       for (const key of ['email', 'phone', 'address', 'notes', 'insuranceProvider', 'insurancePolicyNumber', 'insuranceCoverageDetails']) {
         if (clean[key] === '') clean[key] = null
       }
       // Convert dateOfBirth string to Date or null
       if (clean.dateOfBirth === '' || clean.dateOfBirth === undefined) {
-        clean.dateOfBirth = null
+        delete clean.dateOfBirth
       } else if (typeof clean.dateOfBirth === 'string') {
         clean.dateOfBirth = new Date(clean.dateOfBirth)
       }
@@ -617,14 +638,14 @@ function registerIpcHandlers() {
 
   ipcMain.handle('frames:create', async (_e, frame: any) => {
     try {
-      const data = await prisma.frame.create({ data: frame })
+      const data = await prisma.frame.create({ data: pickFields(frame, FRAME_FIELDS) as any })
       return { data }
     } catch (err: any) { return { error: err.message } }
   })
 
   ipcMain.handle('frames:update', async (_e, id: string, updates: any) => {
     try {
-      const data = await prisma.frame.update({ where: { id }, data: updates })
+      const data = await prisma.frame.update({ where: { id }, data: pickFields(updates, FRAME_FIELDS) })
       return { data }
     } catch (err: any) { return { error: err.message } }
   })
@@ -656,14 +677,14 @@ function registerIpcHandlers() {
 
   ipcMain.handle('lensTypes:create', async (_e, lensType: any) => {
     try {
-      const data = await prisma.lensType.create({ data: lensType })
+      const data = await prisma.lensType.create({ data: pickFields(lensType, LENS_TYPE_FIELDS) as any })
       return { data }
     } catch (err: any) { return { error: err.message } }
   })
 
   ipcMain.handle('lensTypes:update', async (_e, id: string, updates: any) => {
     try {
-      const data = await prisma.lensType.update({ where: { id }, data: updates })
+      const data = await prisma.lensType.update({ where: { id }, data: pickFields(updates, LENS_TYPE_FIELDS) })
       return { data }
     } catch (err: any) { return { error: err.message } }
   })
@@ -691,12 +712,12 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('contactLenses:create', async (_e, contactLens: any) => {
-    try { return { data: await prisma.contactLens.create({ data: contactLens }) } }
+    try { return { data: await prisma.contactLens.create({ data: pickFields(contactLens, CONTACT_LENS_FIELDS) as any }) } }
     catch (err: any) { return { error: err.message } }
   })
 
   ipcMain.handle('contactLenses:update', async (_e, id: string, updates: any) => {
-    try { return { data: await prisma.contactLens.update({ where: { id }, data: updates }) } }
+    try { return { data: await prisma.contactLens.update({ where: { id }, data: pickFields(updates, CONTACT_LENS_FIELDS) }) } }
     catch (err: any) { return { error: err.message } }
   })
 

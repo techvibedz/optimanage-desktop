@@ -5,7 +5,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { toast } from 'sonner'
 import {
   Plus, Trash2, X, Printer, Search,
-  ChevronDown, Check, FileText, ScanLine, Loader2, Camera, Video, ListPlus
+  ChevronDown, Check, FileText, ScanLine, Loader2, Camera, Video, ListPlus, Pencil
 } from 'lucide-react'
 import OrderSlip from '@/components/print/OrderSlip'
 
@@ -457,6 +457,13 @@ export default function CreateOrderPage() {
   const [newCustPhone, setNewCustPhone] = useState('')
   const [newCustCreating, setNewCustCreating] = useState(false)
 
+  // Inline edit existing customer form
+  const [showEditCustomerForm, setShowEditCustomerForm] = useState(false)
+  const [editCustFirstName, setEditCustFirstName] = useState('')
+  const [editCustLastName, setEditCustLastName] = useState('')
+  const [editCustPhone, setEditCustPhone] = useState('')
+  const [editCustUpdating, setEditCustUpdating] = useState(false)
+
   // Inline new prescription form
   const [showNewRxForm, setShowNewRxForm] = useState(false)
   const [newRxCreating, setNewRxCreating] = useState(false)
@@ -606,6 +613,36 @@ export default function CreateOrderPage() {
       }
     } catch (err: any) { toast.error(err.message || 'Failed') }
     finally { setNewCustCreating(false) }
+  }
+
+  const openEditCustomer = () => {
+    const cust = customers.find(c => c.id === customerId)
+    if (!cust) return
+    setEditCustFirstName(cust.firstName || '')
+    setEditCustLastName(cust.lastName || '')
+    setEditCustPhone(cust.phone || '')
+    setShowEditCustomerForm(true)
+    setShowNewCustomerForm(false)
+  }
+
+  const handleUpdateCustomer = async () => {
+    if (!customerId) return
+    if (!editCustFirstName.trim()) { toast.error(t('customers.firstName') + ' required'); return }
+    setEditCustUpdating(true)
+    try {
+      const res = await window.electronAPI.updateCustomer(customerId, {
+        firstName: editCustFirstName.trim(),
+        lastName: editCustLastName.trim() || '',
+        phone: editCustPhone.trim() || null,
+      })
+      if (res.error) { toast.error(res.error); return }
+      if (res.data) {
+        setCustomers(prev => prev.map(c => c.id === customerId ? { ...c, ...res.data } : c))
+        setShowEditCustomerForm(false)
+        toast.success(t('customers.customerUpdated') || 'Customer updated')
+      }
+    } catch (err: any) { toast.error(err.message || 'Failed') }
+    finally { setEditCustUpdating(false) }
   }
 
   const handleCreatePrescription = async () => {
@@ -1009,13 +1046,24 @@ export default function CreateOrderPage() {
             </h3>
             <CustomerSearch customers={customers} value={customerId} onChange={setCustomerId} t={t} />
 
-            {/* Inline Add New Customer */}
-            {!showNewCustomerForm ? (
-              <button type="button" onClick={() => setShowNewCustomerForm(true)}
-                className="mt-3 inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border border-violet-200 dark:border-violet-800/50 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-all shadow-sm">
-                <Plus className="h-3.5 w-3.5" /> {t('customers.addCustomer') || 'Add New Customer'}
-              </button>
-            ) : (
+            {/* Inline Add / Edit Customer buttons */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {!showNewCustomerForm && !showEditCustomerForm && (
+                <button type="button" onClick={() => setShowNewCustomerForm(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border border-violet-200 dark:border-violet-800/50 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-all shadow-sm">
+                  <Plus className="h-3.5 w-3.5" /> {t('customers.addCustomer') || 'Add New Customer'}
+                </button>
+              )}
+              {customerId && !showNewCustomerForm && !showEditCustomerForm && (
+                <button type="button" onClick={openEditCustomer}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all shadow-sm">
+                  <Pencil className="h-3.5 w-3.5" /> {t('customers.editCustomer') || 'Edit Customer'}
+                </button>
+              )}
+            </div>
+
+            {/* Inline New Customer Form */}
+            {showNewCustomerForm && (
               <div className="mt-3 p-3 border border-dashed border-primary/40 rounded-lg bg-primary/5 space-y-2">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-semibold text-primary">{t('customers.addCustomer') || 'New Customer'}</span>
@@ -1037,6 +1085,33 @@ export default function CreateOrderPage() {
                 <button type="button" onClick={handleCreateCustomer} disabled={newCustCreating || !newCustFirstName.trim()}
                   className="w-full py-2 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-1.5">
                   <Plus className="h-3.5 w-3.5" /> {newCustCreating ? '...' : (t('common.create') || 'Create')}
+                </button>
+              </div>
+            )}
+
+            {/* Inline Edit Customer Form */}
+            {showEditCustomerForm && (
+              <div className="mt-3 p-3 border border-dashed border-amber-400/60 rounded-lg bg-amber-50/60 dark:bg-amber-900/15 space-y-2">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs font-semibold text-amber-700 dark:text-amber-400">{t('customers.editCustomer') || 'Edit Customer'}</span>
+                  <button type="button" onClick={() => setShowEditCustomerForm(false)} className="p-0.5 hover:bg-muted rounded">
+                    <X className="h-3.5 w-3.5 text-muted-foreground" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={editCustFirstName} onChange={e => setEditCustFirstName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleUpdateCustomer() }}
+                    placeholder={t('customers.firstName') || 'First name'} className="px-3 py-2 border border-border rounded-lg text-sm bg-background" />
+                  <input value={editCustLastName} onChange={e => setEditCustLastName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleUpdateCustomer() }}
+                    placeholder={t('customers.lastName') || 'Last name'} className="px-3 py-2 border border-border rounded-lg text-sm bg-background" />
+                </div>
+                <input value={editCustPhone} onChange={e => setEditCustPhone(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleUpdateCustomer() }}
+                  placeholder={t('customers.phone') || 'Phone'} className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background" />
+                <button type="button" onClick={handleUpdateCustomer} disabled={editCustUpdating || !editCustFirstName.trim()}
+                  className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 flex items-center justify-center gap-1.5">
+                  <Check className="h-3.5 w-3.5" /> {editCustUpdating ? '...' : (t('common.save') || 'Save Changes')}
                 </button>
               </div>
             )}
