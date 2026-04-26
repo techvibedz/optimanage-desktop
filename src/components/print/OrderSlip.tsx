@@ -96,11 +96,11 @@ export default function OrderSlip({ order }: OrderSlipProps) {
             {order.orderNumber && (
               <Barcode
                 value={order.orderNumber}
-                height={compact ? 32 : normal ? 38 : 44}
-                width={compact ? 1.6 : normal ? 1.9 : 2.2}
+                height={compact ? 22 : normal ? 26 : 30}
+                width={compact ? 1.1 : normal ? 1.3 : 1.5}
                 displayValue={false}
                 margin={0}
-                style={{ display: 'block', margin: '0 auto', maxWidth: '50mm' }}
+                style={{ display: 'block', margin: '0 auto', maxWidth: '40mm' }}
               />
             )}
           </td>
