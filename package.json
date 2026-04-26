@@ -1,6 +1,6 @@
 {
   "name": "optimanage-desktop",
-  "version": "1.2.36",
+  "version": "1.2.37",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
@@ -88,6 +88,8 @@
     "@radix-ui/react-tooltip": "^1.1.6",
     "@supabase/supabase-js": "^2.49.1",
     "@tanstack/react-table": "^8.20.6",
+    "@zxing/browser": "^0.1.5",
+    "@zxing/library": "^0.21.3",
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^12.6.2",
     "class-variance-authority": "^0.7.1",

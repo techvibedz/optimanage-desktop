@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, net, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, net, session, shell } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import bcrypt from 'bcryptjs'
 import path from 'node:path'
@@ -85,6 +85,16 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Allow camera/mic for the in-app barcode scanner (local app, trusted origin)
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
+    if (permission === 'media' || permission === 'mediaKeySystem') return callback(true)
+    callback(false)
+  })
+  session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+    if (permission === 'media') return true
+    return false
+  })
+
   registerIpcHandlers()
   registerAiHandlers()
   createWindow()

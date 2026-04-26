@@ -1,10 +1,13 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useState } from 'react'
+import { toast } from 'sonner'
 import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useSettings } from '@/lib/settings-context'
+import CameraBarcodeScanner from '@/components/CameraBarcodeScanner'
 import {
   LayoutDashboard, Users, ShoppingCart, FileText, CreditCard,
-  Package, Settings, Eye, LogOut, BarChart3, Sun, Moon, Zap
+  Package, Settings, Eye, LogOut, BarChart3, Sun, Moon, Zap, ScanLine
 } from 'lucide-react'
 
 const navItems = [
@@ -27,9 +30,28 @@ export default function Sidebar() {
   const { t } = useTranslation()
   const { settings, toggleTheme } = useSettings()
 
+  const [scannerOpen, setScannerOpen] = useState(false)
+
   const handleLogout = async () => {
     await logout()
     navigate('/login')
+  }
+
+  const handleScanned = async (text: string) => {
+    setScannerOpen(false)
+    const code = text.trim().toUpperCase()
+    if (!/^ORD-\d+$/i.test(code)) {
+      toast.error(`Code-barres non reconnu: ${code}`)
+      return
+    }
+    if (!user?.id) return
+    const res = await window.electronAPI.findOrderByNumber({ userId: user.id, orderNumber: code })
+    if (res.data?.id) {
+      toast.success(`Commande ${code} ouverte`)
+      navigate(`/orders/${res.data.id}`)
+    } else {
+      toast.error(`Commande ${code} introuvable`)
+    }
   }
 
   const filtered = navItems.filter(item => {
@@ -72,6 +94,12 @@ export default function Sidebar() {
             </Link>
           </li>
           <li>
+            <button onClick={() => setScannerOpen(true)} type="button">
+              <ScanLine className="sidebar-icon" />
+              <span>Scanner code-barres</span>
+            </button>
+          </li>
+          <li>
             <button onClick={toggleTheme} type="button">
               {settings.theme === 'dark' ? <Sun className="sidebar-icon" /> : <Moon className="sidebar-icon" />}
               <span>{settings.theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
@@ -92,6 +120,12 @@ export default function Sidebar() {
           <p className="user-role">{user?.role === 'ADMIN' ? t('common.administrator') : t('common.user')}</p>
         </div>
       </div>
+
+      <CameraBarcodeScanner
+        open={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onDetected={handleScanned}
+      />
     </aside>
   )
 }
