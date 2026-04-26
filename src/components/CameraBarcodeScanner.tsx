@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser'
+import { BrowserMultiFormatReader } from '@zxing/browser'
 import { BarcodeFormat, DecodeHintType } from '@zxing/library'
 import { X, Camera, RefreshCw } from 'lucide-react'
 
@@ -24,7 +24,8 @@ export default function CameraBarcodeScanner({
   title = 'Scanner un code-barres',
 }: CameraBarcodeScannerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const controlsRef = useRef<IScannerControls | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const stopRef = useRef<(() => void) | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const [deviceId, setDeviceId] = useState<string | undefined>(undefined)
@@ -57,73 +58,126 @@ export default function CameraBarcodeScanner({
   // Start / restart scanning whenever the modal is open and a device is chosen.
   useEffect(() => {
     if (!open || !deviceId || !videoRef.current) return
+    const video = videoRef.current
 
-    // Performance hints for low-quality webcams:
-    //  - Restrict to CODE_128 only (the format used on our slips). Each extra
-    //    format roughly doubles per-frame decode work.
-    //  - TRY_HARDER: more aggressive scan-line search (slower per frame but
-    //    catches blurry / partial barcodes that fast mode misses).
+    // Restrict to CODE_128 (slip format) and enable TRY_HARDER. With a single
+    // format, each decode attempt is fast enough to run at ~12/sec.
     const hints = new Map()
     hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128])
     hints.set(DecodeHintType.TRY_HARDER, true)
+    const reader = new BrowserMultiFormatReader(hints)
 
-    // Use a faster decoder cycle (default is 500ms). 100ms ≈ 10 attempts/sec.
-    const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 100 } as any)
     setStarting(true)
     setError(null)
 
-    // Request the highest resolution the camera can deliver. Sharper frames
-    // matter much more than frame-rate when the lens is poor: a 1080p frame
-    // at 15fps decodes a barcode far better than a 480p frame at 30fps.
+    // Off-screen canvases reused across the loop. ZXing's 1D readers only
+    // scan horizontal rows, so a 90°-rotated copy is needed to also detect
+    // barcodes held vertically — that's what makes "any orientation" work.
+    const baseCanvas = document.createElement('canvas')
+    const baseCtx = baseCanvas.getContext('2d', { willReadFrequently: true })!
+    const rotCanvas = document.createElement('canvas')
+    const rotCtx = rotCanvas.getContext('2d', { willReadFrequently: true })!
+
+    let stopped = false
+    let timeoutId: number | null = null
+
+    const tryDecodeCanvas = (c: HTMLCanvasElement): string | null => {
+      try {
+        const result = (reader as any).decodeFromCanvas(c)
+        return result?.getText?.() ?? null
+      } catch {
+        return null
+      }
+    }
+
+    const loop = () => {
+      if (stopped) return
+      if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+        const w = video.videoWidth
+        const h = video.videoHeight
+        if (baseCanvas.width !== w || baseCanvas.height !== h) {
+          baseCanvas.width = w
+          baseCanvas.height = h
+        }
+        baseCtx.drawImage(video, 0, 0, w, h)
+
+        // 1) Try the original orientation first (most common case).
+        let text = tryDecodeCanvas(baseCanvas)
+
+        // 2) If not found, rotate 90° and try again. This catches barcodes
+        //    held vertically — bars become horizontal in the source frame
+        //    and ZXing's row scan would miss them otherwise.
+        if (!text) {
+          if (rotCanvas.width !== h || rotCanvas.height !== w) {
+            rotCanvas.width = h
+            rotCanvas.height = w
+          }
+          rotCtx.save()
+          rotCtx.translate(rotCanvas.width / 2, rotCanvas.height / 2)
+          rotCtx.rotate(Math.PI / 2)
+          rotCtx.drawImage(baseCanvas, -w / 2, -h / 2)
+          rotCtx.restore()
+          text = tryDecodeCanvas(rotCanvas)
+        }
+
+        if (text) {
+          stopped = true
+          stopRef.current?.()
+          onDetected(text)
+          return
+        }
+      }
+      timeoutId = window.setTimeout(loop, 80)
+    }
+
+    // Acquire the camera ourselves so we can manage the loop lifecycle and
+    // also apply continuous autofocus once the track is live.
     const constraints: MediaStreamConstraints = {
       video: {
         deviceId: { exact: deviceId },
         width: { ideal: 1920 },
         height: { ideal: 1080 },
-        // facingMode is ignored on PCs but improves phone behavior if ever ported.
         facingMode: { ideal: 'environment' },
-        // Hint the browser to prefer continuous autofocus/exposure if available.
-        // (Cast to any — these are non-standard on TS lib types but supported
-        // in Chromium-based Electron.)
-        ...( {
-          advanced: [
-            { focusMode: 'continuous' },
-            { exposureMode: 'continuous' },
-            { whiteBalanceMode: 'continuous' },
-          ],
-        } as any ),
       },
       audio: false,
     }
 
-    reader
-      .decodeFromConstraints(constraints, videoRef.current, (result, _err, controls) => {
-        if (controls && !controlsRef.current) {
-          controlsRef.current = controls
-          // Once the track is live, try to apply continuous autofocus etc. via
-          // applyConstraints — many webcams expose these only post-start.
-          const stream = videoRef.current?.srcObject as MediaStream | null
-          const track = stream?.getVideoTracks()[0]
-          if (track) {
-            const caps = (track.getCapabilities?.() || {}) as any
-            const adv: any[] = []
-            if (caps.focusMode?.includes?.('continuous')) adv.push({ focusMode: 'continuous' })
-            if (caps.exposureMode?.includes?.('continuous')) adv.push({ exposureMode: 'continuous' })
-            if (caps.whiteBalanceMode?.includes?.('continuous')) adv.push({ whiteBalanceMode: 'continuous' })
-            if (adv.length) track.applyConstraints({ advanced: adv } as any).catch(() => {})
-          }
+    const stop = () => {
+      stopped = true
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+        timeoutId = null
+      }
+      streamRef.current?.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+      if (video.srcObject) video.srcObject = null
+    }
+    stopRef.current = stop
+
+    navigator.mediaDevices
+      .getUserMedia(constraints)
+      .then(async stream => {
+        if (stopped) {
+          stream.getTracks().forEach(t => t.stop())
+          return
         }
-        if (result) {
-          const text = result.getText()
-          // Stop the camera before bubbling the result up.
-          controlsRef.current?.stop()
-          controlsRef.current = null
-          onDetected(text)
+        streamRef.current = stream
+        video.srcObject = stream
+        await video.play().catch(() => {})
+
+        // Apply continuous autofocus / exposure / white-balance if supported.
+        const track = stream.getVideoTracks()[0]
+        if (track) {
+          const caps = (track.getCapabilities?.() || {}) as any
+          const adv: any[] = []
+          if (caps.focusMode?.includes?.('continuous')) adv.push({ focusMode: 'continuous' })
+          if (caps.exposureMode?.includes?.('continuous')) adv.push({ exposureMode: 'continuous' })
+          if (caps.whiteBalanceMode?.includes?.('continuous')) adv.push({ whiteBalanceMode: 'continuous' })
+          if (adv.length) track.applyConstraints({ advanced: adv } as any).catch(() => {})
         }
-      })
-      .then(controls => {
-        controlsRef.current = controls
+
         setStarting(false)
+        loop()
       })
       .catch(err => {
         setError(err?.message || 'Failed to start camera')
@@ -131,8 +185,7 @@ export default function CameraBarcodeScanner({
       })
 
     return () => {
-      controlsRef.current?.stop()
-      controlsRef.current = null
+      stop()
     }
   }, [open, deviceId, onDetected])
 
@@ -155,12 +208,12 @@ export default function CameraBarcodeScanner({
 
         <div className="relative w-full aspect-video bg-black rounded-lg overflow-hidden">
           <video ref={videoRef} className="w-full h-full object-cover" muted playsInline />
-          {/* Visual aiming guide */}
-          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-            <div className="w-3/4 h-1/3 border-2 border-red-500/80 rounded-md shadow-[0_0_0_9999px_rgba(0,0,0,0.25)]" />
+          {/* Subtle scanning indicator (animated horizontal line) */}
+          <div className="absolute inset-0 pointer-events-none overflow-hidden">
+            <div className="absolute inset-x-0 h-0.5 bg-red-500/80 shadow-[0_0_8px_2px_rgba(239,68,68,0.6)] animate-[scan_1.6s_linear_infinite]" />
           </div>
           {starting && (
-            <div className="absolute inset-0 flex items-center justify-center text-white text-sm">
+            <div className="absolute inset-0 flex items-center justify-center text-white text-sm bg-black/40">
               <RefreshCw className="h-5 w-5 animate-spin mr-2" /> Démarrage de la caméra…
             </div>
           )}
@@ -190,7 +243,7 @@ export default function CameraBarcodeScanner({
         )}
 
         <p className="mt-3 text-xs text-muted-foreground text-center">
-          Pointez la caméra sur le code-barres du bon de commande.
+          Présentez le code-barres devant la caméra — n'importe où dans le cadre, dans n'importe quel sens.
         </p>
       </div>
     </div>,

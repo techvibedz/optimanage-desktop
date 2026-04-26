@@ -410,6 +410,13 @@ input, textarea, select {
   @apply animate-pulse;
 }
 
+/* Scan line animation for the webcam barcode scanner */
+@keyframes scan {
+  0%   { top: 0%; }
+  50%  { top: 100%; }
+  100% { top: 0%; }
+}
+
 .table-skeleton-row {
   @apply flex items-center gap-4 px-4 py-3.5 border-b border-border/20;
 }
