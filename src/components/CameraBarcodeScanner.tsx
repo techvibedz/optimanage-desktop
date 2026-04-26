@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { BrowserMultiFormatReader, IScannerControls } from '@zxing/browser'
 import { BarcodeFormat, DecodeHintType } from '@zxing/library'
 import { X, Camera, RefreshCw } from 'lucide-react'
@@ -99,8 +100,8 @@ export default function CameraBarcodeScanner({
 
   if (!open) return null
 
-  return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+  return createPortal(
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[100]" onClick={onClose}>
       <div
         className="bg-white dark:bg-gray-800 rounded-xl p-4 w-full max-w-lg shadow-xl"
         onClick={e => e.stopPropagation()}
@@ -154,6 +155,7 @@ export default function CameraBarcodeScanner({
           Pointez la caméra sur le code-barres du bon de commande.
         </p>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
