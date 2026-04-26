@@ -58,23 +58,61 @@ export default function CameraBarcodeScanner({
   useEffect(() => {
     if (!open || !deviceId || !videoRef.current) return
 
+    // Performance hints for low-quality webcams:
+    //  - Restrict to CODE_128 only (the format used on our slips). Each extra
+    //    format roughly doubles per-frame decode work.
+    //  - TRY_HARDER: more aggressive scan-line search (slower per frame but
+    //    catches blurry / partial barcodes that fast mode misses).
     const hints = new Map()
-    hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-      BarcodeFormat.CODE_128,
-      BarcodeFormat.CODE_39,
-      BarcodeFormat.EAN_13,
-      BarcodeFormat.EAN_8,
-      BarcodeFormat.QR_CODE,
-    ])
+    hints.set(DecodeHintType.POSSIBLE_FORMATS, [BarcodeFormat.CODE_128])
     hints.set(DecodeHintType.TRY_HARDER, true)
 
-    const reader = new BrowserMultiFormatReader(hints)
+    // Use a faster decoder cycle (default is 500ms). 100ms ≈ 10 attempts/sec.
+    const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 100 } as any)
     setStarting(true)
     setError(null)
 
+    // Request the highest resolution the camera can deliver. Sharper frames
+    // matter much more than frame-rate when the lens is poor: a 1080p frame
+    // at 15fps decodes a barcode far better than a 480p frame at 30fps.
+    const constraints: MediaStreamConstraints = {
+      video: {
+        deviceId: { exact: deviceId },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        // facingMode is ignored on PCs but improves phone behavior if ever ported.
+        facingMode: { ideal: 'environment' },
+        // Hint the browser to prefer continuous autofocus/exposure if available.
+        // (Cast to any — these are non-standard on TS lib types but supported
+        // in Chromium-based Electron.)
+        ...( {
+          advanced: [
+            { focusMode: 'continuous' },
+            { exposureMode: 'continuous' },
+            { whiteBalanceMode: 'continuous' },
+          ],
+        } as any ),
+      },
+      audio: false,
+    }
+
     reader
-      .decodeFromVideoDevice(deviceId, videoRef.current, (result, _err, controls) => {
-        if (controls && !controlsRef.current) controlsRef.current = controls
+      .decodeFromConstraints(constraints, videoRef.current, (result, _err, controls) => {
+        if (controls && !controlsRef.current) {
+          controlsRef.current = controls
+          // Once the track is live, try to apply continuous autofocus etc. via
+          // applyConstraints — many webcams expose these only post-start.
+          const stream = videoRef.current?.srcObject as MediaStream | null
+          const track = stream?.getVideoTracks()[0]
+          if (track) {
+            const caps = (track.getCapabilities?.() || {}) as any
+            const adv: any[] = []
+            if (caps.focusMode?.includes?.('continuous')) adv.push({ focusMode: 'continuous' })
+            if (caps.exposureMode?.includes?.('continuous')) adv.push({ exposureMode: 'continuous' })
+            if (caps.whiteBalanceMode?.includes?.('continuous')) adv.push({ whiteBalanceMode: 'continuous' })
+            if (adv.length) track.applyConstraints({ advanced: adv } as any).catch(() => {})
+          }
+        }
         if (result) {
           const text = result.getText()
           // Stop the camera before bubbling the result up.
