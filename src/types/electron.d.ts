@@ -38,6 +38,7 @@ export interface ElectronAPI {
   updateOrder: (id: string, updates: any) => Promise<{ data?: any; error?: string }>
   deleteOrder: (id: string) => Promise<{ success?: boolean; error?: string }>
   getLatestOrderNumber: (userId: string) => Promise<{ data?: string | null }>
+  findOrderByNumber: (params: { userId: string; orderNumber: string }) => Promise<{ data?: { id: string; orderNumber: string } | null; error?: string }>
 
   // Prescriptions
   getPrescriptions: (params: any) => Promise<{ data?: any; error?: string }>

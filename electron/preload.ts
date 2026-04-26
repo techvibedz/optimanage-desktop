@@ -22,6 +22,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   updateOrder: (id: string, updates: any) => ipcRenderer.invoke('orders:update', id, updates),
   deleteOrder: (id: string) => ipcRenderer.invoke('orders:delete', id),
   getLatestOrderNumber: (userId: string) => ipcRenderer.invoke('orders:latestNumber', userId),
+  findOrderByNumber: (params: { userId: string; orderNumber: string }) => ipcRenderer.invoke('orders:findByOrderNumber', params),
 
   // Prescriptions
   getPrescriptions: (params: any) => ipcRenderer.invoke('prescriptions:list', params),

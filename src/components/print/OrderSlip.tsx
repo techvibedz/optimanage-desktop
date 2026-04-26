@@ -1,6 +1,7 @@
 import { useSettings } from '@/lib/settings-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useRef, useLayoutEffect, useState } from 'react'
+import Barcode from './Barcode'
 
 interface LensTypeInfo { name: string }
 
@@ -90,6 +91,18 @@ export default function OrderSlip({ order }: OrderSlipProps) {
             <div style={{ fontSize: fs('9.5pt', '10pt', '11pt'), fontWeight: 800, lineHeight: '1.2' }}>{settings.opticianName || 'OptiManage'}</div>
             {settings.opticianAddress && <div style={{ fontSize: fs('5.5pt', '6.5pt', '7pt'), color: '#444', lineHeight: '1.1', maxWidth: '50mm', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{settings.opticianAddress}</div>}
             {settings.opticianPhone && <div style={{ fontSize: fs('6pt', '6.5pt', '7.5pt'), color: '#444' }}>{settings.opticianPhone}</div>}
+          </td>
+          <td style={{ verticalAlign: 'middle', textAlign: 'center', padding: '0 2mm' }}>
+            {order.orderNumber && (
+              <Barcode
+                value={order.orderNumber}
+                height={compact ? 22 : normal ? 26 : 30}
+                width={compact ? 1.1 : normal ? 1.3 : 1.5}
+                displayValue={false}
+                margin={0}
+                style={{ display: 'block', margin: '0 auto', maxWidth: '40mm' }}
+              />
+            )}
           </td>
           <td style={{ verticalAlign: 'top', textAlign: 'right', whiteSpace: 'nowrap' }}>
             <div style={{ fontSize: fs('6.5pt', '7pt', '8pt'), fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '0.5mm' }}>{label}</div>

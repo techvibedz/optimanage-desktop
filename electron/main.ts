@@ -431,6 +431,18 @@ function registerIpcHandlers() {
     }
   })
 
+  ipcMain.handle('orders:findByOrderNumber', async (_e, params: { userId: string; orderNumber: string }) => {
+    try {
+      const order = await prisma.order.findUnique({
+        where: { orderNumber_userId: { orderNumber: params.orderNumber, userId: params.userId } },
+        select: { id: true, orderNumber: true },
+      })
+      return { data: order }
+    } catch (err: any) {
+      return { error: err.message }
+    }
+  })
+
   ipcMain.handle('orders:get', async (_e, id: string) => {
     try {
       const data = await prisma.order.findUnique({

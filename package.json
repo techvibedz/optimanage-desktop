@@ -1,6 +1,6 @@
 {
   "name": "optimanage-desktop",
-  "version": "1.2.35",
+  "version": "1.2.36",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
@@ -96,6 +96,7 @@
     "date-fns": "^3.6.0",
     "electron-updater": "^6.8.3",
     "framer-motion": "^12.4.0",
+    "jsbarcode": "^3.12.3",
     "jspdf": "^2.5.2",
     "lucide-react": "^0.454.0",
     "prisma": "^5.22.0",

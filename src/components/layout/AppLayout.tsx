@@ -2,6 +2,7 @@ import { Suspense } from 'react'
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import UpdateModal from './UpdateModal'
+import { useBarcodeScanner } from '@/lib/useBarcodeScanner'
 
 function PageLoader() {
   return (
@@ -12,6 +13,7 @@ function PageLoader() {
 }
 
 export default function AppLayout() {
+  useBarcodeScanner()
   return (
     <div className="app-layout">
       <div className="app-sidebar">
