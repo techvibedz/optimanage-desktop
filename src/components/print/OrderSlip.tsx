@@ -80,39 +80,53 @@ export default function OrderSlip({ order }: OrderSlipProps) {
   const hCell: React.CSSProperties = { ...cell, fontWeight: 800, fontSize: fs('6.5pt', '7.5pt', '8.5pt'), borderBottom: '2px solid #000' }
 
   // ── Header row content ──
-  const HeaderContent = ({ label }: { label: string }) => (
-    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-      <tbody>
-        <tr>
-          <td style={{ verticalAlign: 'middle', width: settings.logoUrl ? '12mm' : '0' }}>
-            {settings.logoUrl && <img src={settings.logoUrl} alt="" style={{ width: fs('9mm', '10mm', '11mm'), height: fs('9mm', '10mm', '11mm'), objectFit: 'contain' }} />}
-          </td>
-          <td style={{ verticalAlign: 'middle', paddingLeft: '2mm' }}>
-            <div style={{ fontSize: fs('9.5pt', '10pt', '11pt'), fontWeight: 800, lineHeight: '1.2' }}>{settings.opticianName || 'OptiManage'}</div>
-            {settings.opticianAddress && <div style={{ fontSize: fs('5.5pt', '6.5pt', '7pt'), color: '#444', lineHeight: '1.1', maxWidth: '50mm', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{settings.opticianAddress}</div>}
-            {settings.opticianPhone && <div style={{ fontSize: fs('6pt', '6.5pt', '7.5pt'), color: '#444' }}>{settings.opticianPhone}</div>}
-          </td>
-          <td style={{ verticalAlign: 'middle', textAlign: 'center', padding: '0 2mm' }}>
-            {order.orderNumber && (
-              <Barcode
-                value={order.orderNumber}
-                height={compact ? 22 : normal ? 26 : 30}
-                width={compact ? 1.1 : normal ? 1.3 : 1.5}
-                displayValue={false}
-                margin={0}
-                style={{ display: 'block', margin: '0 auto', maxWidth: '40mm' }}
-              />
-            )}
-          </td>
-          <td style={{ verticalAlign: 'top', textAlign: 'right', whiteSpace: 'nowrap' }}>
-            <div style={{ fontSize: fs('6.5pt', '7pt', '8pt'), fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '0.5mm' }}>{label}</div>
-            <div style={{ fontSize: fs('12pt', '13pt', '15pt'), fontWeight: 900, lineHeight: '1' }}>{order.orderNumber}</div>
-            <div style={{ fontSize: fs('6pt', '6.5pt', '7.5pt'), color: '#555', marginTop: '0.5mm' }}>{fmtDate(order.createdAt)}</div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  )
+  // Uses table-layout: fixed with explicit column widths so the (variable
+  // width) optician name and the barcode SVG can never push the order-number
+  // column off the page. The barcode is rendered into a fixed-width inner
+  // div, so its responsive SVG fills exactly that box and nothing more.
+  const HeaderContent = ({ label }: { label: string }) => {
+    const logoW = settings.logoUrl ? '13mm' : '0mm'
+    const barcodeW = '36mm'
+    const orderW = '30mm'
+    return (
+      <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+        <colgroup>
+          <col style={{ width: logoW }} />
+          <col />
+          <col style={{ width: barcodeW }} />
+          <col style={{ width: orderW }} />
+        </colgroup>
+        <tbody>
+          <tr>
+            <td style={{ verticalAlign: 'middle', overflow: 'hidden' }}>
+              {settings.logoUrl && <img src={settings.logoUrl} alt="" style={{ width: fs('9mm', '10mm', '11mm'), height: fs('9mm', '10mm', '11mm'), objectFit: 'contain' }} />}
+            </td>
+            <td style={{ verticalAlign: 'middle', paddingLeft: '2mm', overflow: 'hidden' }}>
+              <div style={{ fontSize: fs('9.5pt', '10pt', '11pt'), fontWeight: 800, lineHeight: '1.15', overflowWrap: 'break-word' }}>{settings.opticianName || 'OptiManage'}</div>
+              {settings.opticianAddress && <div style={{ fontSize: fs('5.5pt', '6.5pt', '7pt'), color: '#444', lineHeight: '1.1', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>{settings.opticianAddress}</div>}
+              {settings.opticianPhone && <div style={{ fontSize: fs('6pt', '6.5pt', '7.5pt'), color: '#444', whiteSpace: 'nowrap' }}>{settings.opticianPhone}</div>}
+            </td>
+            <td style={{ verticalAlign: 'middle', textAlign: 'center', padding: '0 1mm', overflow: 'hidden' }}>
+              {order.orderNumber && (
+                <Barcode
+                  value={order.orderNumber}
+                  height={compact ? 22 : normal ? 26 : 30}
+                  width={compact ? 1.1 : normal ? 1.3 : 1.5}
+                  displayValue={false}
+                  margin={0}
+                />
+              )}
+            </td>
+            <td style={{ verticalAlign: 'top', textAlign: 'right', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+              <div style={{ fontSize: fs('6.5pt', '7pt', '8pt'), fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.8px', marginBottom: '0.5mm' }}>{label}</div>
+              <div style={{ fontSize: fs('12pt', '13pt', '15pt'), fontWeight: 900, lineHeight: '1' }}>{order.orderNumber}</div>
+              <div style={{ fontSize: fs('6pt', '6.5pt', '7.5pt'), color: '#555', marginTop: '0.5mm' }}>{fmtDate(order.createdAt)}</div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    )
+  }
 
   // ── Info row content (client + frame) ──
   const InfoContent = () => (
@@ -295,16 +309,38 @@ export default function OrderSlip({ order }: OrderSlipProps) {
     const contentRef = useRef<HTMLDivElement>(null)
     const [scale, setScale] = useState(1)
 
+    // Auto-fit: measure natural (unscaled) content height, then upscale
+    // to fill the half-page. Scale is capped at MAX_UPSCALE to keep the
+    // horizontal CSS width (100/scale%) wide enough for absolute mm/pt
+    // content (e.g. ORD-1847 at 15pt in a 30mm cell, optician name in
+    // its flex column). Above that cap, content stops growing and a
+    // small whitespace gap may remain before the footer — preferable to
+    // horizontal overflow that clips text.
+    const MAX_UPSCALE = 1.3
     useLayoutEffect(() => {
       const measure = () => {
-        if (containerRef.current && contentRef.current) {
-          const cH = containerRef.current.offsetHeight
-          const tH = contentRef.current.offsetHeight
-          if (tH > 0 && cH > tH) {
-            setScale(Math.min(cH / tH, 1.6))
-          } else {
-            setScale(1)
-          }
+        const c = containerRef.current
+        const inner = contentRef.current
+        if (!c || !inner) return
+        // Snapshot styles, reset to natural (no transform, full width,
+        // intrinsic height) so offsetHeight reads the unscaled content
+        // size, then restore.
+        const prevTransform = inner.style.transform
+        const prevWidth = inner.style.width
+        const prevHeight = inner.style.height
+        inner.style.transform = 'none'
+        inner.style.width = '100%'
+        inner.style.height = 'auto'
+        const cH = c.offsetHeight
+        const tH = inner.offsetHeight
+        inner.style.transform = prevTransform
+        inner.style.width = prevWidth
+        inner.style.height = prevHeight
+        if (tH > 0) {
+          const ratio = cH / tH
+          setScale(ratio < 1 ? ratio : Math.min(ratio, MAX_UPSCALE))
+        } else {
+          setScale(1)
         }
       }
       measure()
@@ -316,9 +352,13 @@ export default function OrderSlip({ order }: OrderSlipProps) {
       <div ref={containerRef} style={{ ...F, height: '100%', overflow: 'hidden' }}>
         <div ref={contentRef} style={{
           padding: `${fs('1.5mm', '2mm', '2.5mm')} ${px}`,
+          boxSizing: 'border-box',
           transformOrigin: 'top left',
           transform: `scale(${scale})`,
           width: `${100 / scale}%`,
+          height: `${100 / scale}%`,
+          display: 'flex',
+          flexDirection: 'column',
         }}>
           <HeaderContent label={label} />
           <div style={{ borderBottom: '2px solid #000', margin: `${gap} 0` }} />
@@ -344,7 +384,11 @@ export default function OrderSlip({ order }: OrderSlipProps) {
             </div>
           )}
 
-          <div style={{ marginTop: gap }}>
+          {/* If upscale was capped at MAX_UPSCALE and content still doesn't
+              reach the bottom, the footer is pushed down with margin-top:
+              auto so the remaining gap sits as whitespace BEFORE the
+              footer (cleaner than a gap below it). */}
+          <div style={{ marginTop: 'auto', paddingTop: gap }}>
             <FooterContent large={largeFooter} />
           </div>
         </div>

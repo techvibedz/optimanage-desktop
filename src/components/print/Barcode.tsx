@@ -43,11 +43,25 @@ export default function Barcode({
         background: '#ffffff',
         lineColor: '#000000',
       })
+      // JsBarcode hard-codes pixel width/height on the <svg>. Inside a table
+      // cell those intrinsic dimensions override CSS max-width, which forces
+      // the cell to expand and overflow the page. We drop the attributes and
+      // rely on CSS sizing (width: 100% by default), keeping the viewBox so
+      // the aspect ratio is preserved when scaled.
+      ref.current.removeAttribute('width')
+      ref.current.removeAttribute('height')
+      ref.current.setAttribute('preserveAspectRatio', 'xMidYMid meet')
     } catch {
       /* noop — invalid value */
     }
   }, [value, width, height, fontSize, displayValue, margin, format])
 
   if (!value) return null
-  return <svg ref={ref} className={className} style={style} />
+  return (
+    <svg
+      ref={ref}
+      className={className}
+      style={{ width: '100%', height: 'auto', display: 'block', ...style }}
+    />
+  )
 }
