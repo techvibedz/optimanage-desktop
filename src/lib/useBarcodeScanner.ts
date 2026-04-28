@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, type NavigateFunction } from 'react-router-dom'
 import { toast } from 'sonner'
 import { useAuth } from './auth-context'
 
@@ -23,6 +23,37 @@ const MAX_GAP_MS = 50
 const MIN_LEN = 4
 // Pattern of order numbers we recognize (matches `ORD-1`, `ORD-1841`, etc.)
 const ORDER_NUMBER_RE = /^ORD-\d+$/i
+
+/**
+ * Shared scan handler: validates the code, looks up the order, navigates to
+ * its details page, and surfaces a toast on success/failure.
+ *
+ * Called from:
+ *  - The USB-scanner-as-keyboard listener in `useBarcodeScanner` (this file)
+ *  - The webcam scanner in `Sidebar.tsx`
+ *  - The mobile-phone scanner bridge (Part 1 of the Expo companion app)
+ */
+export async function processScannedCode(
+  rawValue: string,
+  userId: string,
+  navigate: NavigateFunction,
+): Promise<{ ok: boolean; reason?: 'invalid' | 'not_found' }> {
+  const code = rawValue.trim()
+  if (code.length < MIN_LEN) return { ok: false, reason: 'invalid' }
+  if (!ORDER_NUMBER_RE.test(code)) {
+    toast.error(`Code-barres non reconnu: ${code}`)
+    return { ok: false, reason: 'invalid' }
+  }
+  const upper = code.toUpperCase()
+  const res = await window.electronAPI.findOrderByNumber({ userId, orderNumber: upper })
+  if (res.data?.id) {
+    toast.success(`Commande ${upper} ouverte`)
+    navigate(`/orders/${res.data.id}`)
+    return { ok: true }
+  }
+  toast.error(`Commande ${upper} introuvable`)
+  return { ok: false, reason: 'not_found' }
+}
 
 function isTypingInField(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null
@@ -58,21 +89,9 @@ export function useBarcodeScanner() {
         const code = buffer.trim()
         buffer = ''
         if (code.length < MIN_LEN) return
-
-        // Match order number pattern.
         if (ORDER_NUMBER_RE.test(code)) {
           e.preventDefault()
-          const upper = code.toUpperCase()
-          const res = await window.electronAPI.findOrderByNumber({
-            userId: user.id,
-            orderNumber: upper,
-          })
-          if (res.data?.id) {
-            toast.success(`Commande ${upper} ouverte`)
-            navigate(`/orders/${res.data.id}`)
-          } else {
-            toast.error(`Commande ${upper} introuvable`)
-          }
+          await processScannedCode(code, user.id, navigate)
         }
         return
       }

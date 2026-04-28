@@ -3,7 +3,10 @@ import { autoUpdater } from 'electron-updater'
 import bcrypt from 'bcryptjs'
 import path from 'node:path'
 import fs from 'node:fs'
+import os from 'node:os'
+import crypto from 'node:crypto'
 import Module from 'node:module'
+import { WebSocketServer, WebSocket } from 'ws'
 
 // ─── Prisma: redirect requires to extraResources in production ───────────────
 if (app.isPackaged) {
@@ -180,6 +183,194 @@ app.whenReady().then(() => {
 
   ipcMain.handle('connectivity:check', () => {
     try { return net.isOnline() } catch { return true }
+  })
+
+  // ── Mobile Scanner Bridge ──────────────────────────────────────────────────
+  // Lightweight WebSocket server (Node `ws`) bound to the LAN so an Expo
+  // companion app on a phone can stream scanned barcodes into this Electron
+  // app. Pairing is one-shot via QR code: the renderer reads
+  // `mobileScanner:getPairingInfo`, displays a QR with `ws://<lan-ip>:8765/?token=<rand>`,
+  // and the phone connects to that URL. Anything else is rejected.
+  //
+  // The pairing token is persisted to `userData/mobile-scanner.json` so phones
+  // remain paired across desktop restarts; rotating it via the modal kicks
+  // every client and writes a fresh token.
+  const MOBILE_SCANNER_PORT = 8765
+  // Per-client scan rate cap (sliding 1-second window).
+  const SCAN_RATE_LIMIT = 12
+  const tokenFile = path.join(app.getPath('userData'), 'mobile-scanner.json')
+
+  const loadOrCreateToken = (): string => {
+    try {
+      if (fs.existsSync(tokenFile)) {
+        const raw = fs.readFileSync(tokenFile, 'utf8')
+        const parsed = JSON.parse(raw) as { token?: string }
+        if (parsed.token && /^[a-f0-9]{8,64}$/i.test(parsed.token)) {
+          console.log('[MobileScanner] Loaded persisted pairing token')
+          return parsed.token
+        }
+      }
+    } catch (err: any) {
+      console.warn('[MobileScanner] Failed to read token file:', err.message)
+    }
+    const fresh = crypto.randomBytes(8).toString('hex')
+    try {
+      fs.writeFileSync(tokenFile, JSON.stringify({ token: fresh }), 'utf8')
+      console.log('[MobileScanner] Generated and persisted new pairing token')
+    } catch (err: any) {
+      console.warn('[MobileScanner] Failed to persist token (will use in-memory only):', err.message)
+    }
+    return fresh
+  }
+
+  const writeToken = (token: string): void => {
+    try { fs.writeFileSync(tokenFile, JSON.stringify({ token }), 'utf8') }
+    catch (err: any) { console.warn('[MobileScanner] Failed to persist token:', err.message) }
+  }
+
+  let mobileScannerToken = loadOrCreateToken()
+  let mobileScannerServerError: string | null = null
+  // Track per-client scan timestamps for rate limiting.
+  const scanWindow = new WeakMap<WebSocket, number[]>()
+  const mobileScannerClients = new Set<WebSocket>()
+
+  const getLanIPv4 = (): string => {
+    const ifaces = os.networkInterfaces()
+    for (const list of Object.values(ifaces)) {
+      if (!list) continue
+      for (const net of list) {
+        // Node typings: family is 'IPv4' on >=18, was 4 on older versions.
+        const isV4 = (net.family as any) === 'IPv4' || (net.family as any) === 4
+        if (isV4 && !net.internal && net.address && !net.address.startsWith('127.')) {
+          return net.address
+        }
+      }
+    }
+    return '127.0.0.1'
+  }
+
+  const broadcastClientCount = () => {
+    mainWindow?.webContents.send('mobileScanner:clientChange', mobileScannerClients.size)
+  }
+
+  const wss = new WebSocketServer({ host: '0.0.0.0', port: MOBILE_SCANNER_PORT })
+  wss.on('connection', (ws, req) => {
+    // Validate ?token= query parameter against the active token.
+    let providedToken = ''
+    try {
+      const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`)
+      providedToken = url.searchParams.get('token') || ''
+    } catch { providedToken = '' }
+
+    if (providedToken !== mobileScannerToken) {
+      console.log('[MobileScanner] Rejected connection: bad token')
+      try { ws.close(4001, 'invalid token') } catch { /* ignore */ }
+      return
+    }
+
+    mobileScannerClients.add(ws)
+    scanWindow.set(ws, [])
+    console.log(`[MobileScanner] Client paired (${mobileScannerClients.size} total)`)
+    broadcastClientCount()
+
+    ws.on('message', (raw) => {
+      let msg: any
+      try { msg = JSON.parse(raw.toString()) } catch { return }
+      if (!msg || typeof msg !== 'object') return
+
+      if (msg.type === 'ping') {
+        try { ws.send(JSON.stringify({ type: 'pong', t: Date.now() })) } catch { /* ignore */ }
+        return
+      }
+
+      if (msg.type === 'hello') {
+        console.log('[MobileScanner] Hello from', msg.client || 'unknown', 'v' + (msg.version || '?'))
+        try { ws.send(JSON.stringify({ type: 'welcome', server: 'optimanage-desktop', version: app.getVersion() })) } catch { /* ignore */ }
+        return
+      }
+
+      if (msg.type === 'scan' && typeof msg.value === 'string') {
+        const value = msg.value.trim()
+        if (value.length === 0 || value.length > 64) return
+
+        // Per-client sliding-window rate limit.
+        const now = Date.now()
+        const window = scanWindow.get(ws) || []
+        const recent = window.filter((t) => now - t < 1000)
+        if (recent.length >= SCAN_RATE_LIMIT) {
+          console.warn('[MobileScanner] Scan rate limit hit, dropping value:', value)
+          try { ws.send(JSON.stringify({ type: 'rate_limited' })) } catch { /* ignore */ }
+          return
+        }
+        recent.push(now)
+        scanWindow.set(ws, recent)
+
+        console.log('[MobileScanner] Scan:', value)
+        mainWindow?.webContents.send('mobileScanner:scan', value)
+        try { ws.send(JSON.stringify({ type: 'ack', value })) } catch { /* ignore */ }
+        return
+      }
+    })
+
+    ws.on('close', () => {
+      mobileScannerClients.delete(ws)
+      scanWindow.delete(ws)
+      console.log(`[MobileScanner] Client disconnected (${mobileScannerClients.size} remaining)`)
+      broadcastClientCount()
+    })
+
+    ws.on('error', (err) => {
+      console.warn('[MobileScanner] Client error:', err.message)
+    })
+  })
+  wss.on('error', (err: any) => {
+    console.error('[MobileScanner] Server error:', err.message)
+    if (err && err.code === 'EADDRINUSE') {
+      mobileScannerServerError = `Le port ${MOBILE_SCANNER_PORT} est déjà utilisé par une autre application.`
+    } else {
+      mobileScannerServerError = err.message || 'Erreur du serveur scanner mobile.'
+    }
+    mainWindow?.webContents.send('mobileScanner:serverError', mobileScannerServerError)
+  })
+  wss.on('listening', () => {
+    mobileScannerServerError = null
+    console.log(`[MobileScanner] WebSocket server listening on 0.0.0.0:${MOBILE_SCANNER_PORT}`)
+  })
+
+  // Kick all paired clients (forces re-pairing) — used by the "Regenerate" button.
+  const kickAllMobileClients = (reason = 'token rotated') => {
+    for (const c of mobileScannerClients) {
+      try { c.close(4001, reason) } catch { /* ignore */ }
+    }
+    mobileScannerClients.clear()
+    broadcastClientCount()
+  }
+
+  const buildPairingInfo = () => {
+    const ip = getLanIPv4()
+    return {
+      url: `ws://${ip}:${MOBILE_SCANNER_PORT}/?token=${mobileScannerToken}`,
+      lanIp: ip,
+      port: MOBILE_SCANNER_PORT,
+      token: mobileScannerToken,
+      connectedDevices: mobileScannerClients.size,
+      serverError: mobileScannerServerError,
+    }
+  }
+
+  ipcMain.handle('mobileScanner:getPairingInfo', () => buildPairingInfo())
+
+  ipcMain.handle('mobileScanner:regenerateToken', () => {
+    mobileScannerToken = crypto.randomBytes(8).toString('hex')
+    writeToken(mobileScannerToken)
+    kickAllMobileClients('token rotated')
+    return buildPairingInfo()
+  })
+
+  // Stop the WS server on quit so the port isn't left half-bound.
+  app.on('before-quit', () => {
+    try { kickAllMobileClients('app quitting') } catch { /* ignore */ }
+    try { wss.close() } catch { /* ignore */ }
   })
 
   // Updater IPC handlers — registered always (stubs in dev, real in production)

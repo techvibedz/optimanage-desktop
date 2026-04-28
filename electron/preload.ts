@@ -88,6 +88,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => { ipcRenderer.removeListener('connectivity:status', handler) }
   },
 
+  // Mobile Scanner Bridge (Expo companion app)
+  getMobileScannerInfo: () => ipcRenderer.invoke('mobileScanner:getPairingInfo'),
+  regenerateMobileScannerToken: () => ipcRenderer.invoke('mobileScanner:regenerateToken'),
+  onMobileScannerScan: (callback: (value: string) => void) => {
+    const handler = (_event: any, value: string) => callback(value)
+    ipcRenderer.on('mobileScanner:scan', handler)
+    return () => { ipcRenderer.removeListener('mobileScanner:scan', handler) }
+  },
+  onMobileScannerClientChange: (callback: (count: number) => void) => {
+    const handler = (_event: any, count: number) => callback(count)
+    ipcRenderer.on('mobileScanner:clientChange', handler)
+    return () => { ipcRenderer.removeListener('mobileScanner:clientChange', handler) }
+  },
+  onMobileScannerServerError: (callback: (message: string | null) => void) => {
+    const handler = (_event: any, message: string | null) => callback(message)
+    ipcRenderer.on('mobileScanner:serverError', handler)
+    return () => { ipcRenderer.removeListener('mobileScanner:serverError', handler) }
+  },
+
   // Updater
   checkUpdate: () => ipcRenderer.invoke('updater:check'),
   downloadUpdate: () => ipcRenderer.invoke('updater:download'),

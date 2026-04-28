@@ -2,6 +2,7 @@ import { Suspense } from 'react'
 import { Outlet } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import UpdateModal from './UpdateModal'
+import MobileScannerBridge from '@/components/MobileScannerBridge'
 import { useBarcodeScanner } from '@/lib/useBarcodeScanner'
 
 function PageLoader() {
@@ -25,6 +26,7 @@ export default function AppLayout() {
         </Suspense>
       </main>
       <UpdateModal />
+      <MobileScannerBridge />
     </div>
   )
 }

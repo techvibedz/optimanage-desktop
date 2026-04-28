@@ -1,13 +1,14 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { useState } from 'react'
-import { toast } from 'sonner'
+import { useEffect, useState } from 'react'
 import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useSettings } from '@/lib/settings-context'
+import { processScannedCode } from '@/lib/useBarcodeScanner'
 import CameraBarcodeScanner from '@/components/CameraBarcodeScanner'
+import MobileScannerModal from '@/components/MobileScannerModal'
 import {
   LayoutDashboard, Users, ShoppingCart, FileText, CreditCard,
-  Package, Settings, Eye, LogOut, BarChart3, Sun, Moon, Zap, ScanLine
+  Package, Settings, Eye, LogOut, BarChart3, Sun, Moon, Zap, ScanLine, Smartphone
 } from 'lucide-react'
 
 const navItems = [
@@ -31,6 +32,20 @@ export default function Sidebar() {
   const { settings, toggleTheme } = useSettings()
 
   const [scannerOpen, setScannerOpen] = useState(false)
+  const [mobileScannerOpen, setMobileScannerOpen] = useState(false)
+  const [mobileScannerCount, setMobileScannerCount] = useState(0)
+
+  // Seed initial count + subscribe to live changes (no need to open the modal).
+  useEffect(() => {
+    let cancelled = false
+    window.electronAPI.getMobileScannerInfo().then((info) => {
+      if (!cancelled) setMobileScannerCount(info.connectedDevices)
+    }).catch(() => { /* ignore */ })
+    const off = window.electronAPI.onMobileScannerClientChange((count) => {
+      setMobileScannerCount(count)
+    })
+    return () => { cancelled = true; off() }
+  }, [])
 
   const handleLogout = async () => {
     await logout()
@@ -39,19 +54,8 @@ export default function Sidebar() {
 
   const handleScanned = async (text: string) => {
     setScannerOpen(false)
-    const code = text.trim().toUpperCase()
-    if (!/^ORD-\d+$/i.test(code)) {
-      toast.error(`Code-barres non reconnu: ${code}`)
-      return
-    }
     if (!user?.id) return
-    const res = await window.electronAPI.findOrderByNumber({ userId: user.id, orderNumber: code })
-    if (res.data?.id) {
-      toast.success(`Commande ${code} ouverte`)
-      navigate(`/orders/${res.data.id}`)
-    } else {
-      toast.error(`Commande ${code} introuvable`)
-    }
+    await processScannedCode(text, user.id, navigate)
   }
 
   const filtered = navItems.filter(item => {
@@ -100,6 +104,31 @@ export default function Sidebar() {
             </button>
           </li>
           <li>
+            <button
+              onClick={() => setMobileScannerOpen(true)}
+              type="button"
+              style={{ position: 'relative' }}
+              title={mobileScannerCount > 0 ? `${mobileScannerCount} téléphone(s) connecté(s)` : 'Aucun téléphone connecté'}
+            >
+              <Smartphone className="sidebar-icon" />
+              <span>Scanner Mobile</span>
+              {mobileScannerCount > 0 && (
+                <span
+                  aria-label={`${mobileScannerCount} connecté`}
+                  style={{
+                    marginLeft: 'auto',
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    backgroundColor: 'rgb(34,197,94)',
+                    boxShadow: '0 0 0 4px rgba(34,197,94,0.2)',
+                    flexShrink: 0,
+                  }}
+                />
+              )}
+            </button>
+          </li>
+          <li>
             <button onClick={toggleTheme} type="button">
               {settings.theme === 'dark' ? <Sun className="sidebar-icon" /> : <Moon className="sidebar-icon" />}
               <span>{settings.theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
@@ -125,6 +154,11 @@ export default function Sidebar() {
         open={scannerOpen}
         onClose={() => setScannerOpen(false)}
         onDetected={handleScanned}
+      />
+
+      <MobileScannerModal
+        open={mobileScannerOpen}
+        onClose={() => setMobileScannerOpen(false)}
       />
     </aside>
   )

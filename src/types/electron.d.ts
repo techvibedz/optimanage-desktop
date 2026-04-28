@@ -100,6 +100,13 @@ export interface ElectronAPI {
   checkConnectivity: () => Promise<boolean>
   onConnectivityStatus: (callback: (online: boolean) => void) => () => void
 
+  // Mobile Scanner Bridge (Expo companion)
+  getMobileScannerInfo: () => Promise<MobileScannerInfo>
+  regenerateMobileScannerToken: () => Promise<MobileScannerInfo>
+  onMobileScannerScan: (callback: (value: string) => void) => () => void
+  onMobileScannerClientChange: (callback: (count: number) => void) => () => void
+  onMobileScannerServerError: (callback: (message: string | null) => void) => () => void
+
   // Updater
   checkUpdate: () => Promise<{ success?: boolean; error?: string }>
   downloadUpdate: () => Promise<{ success?: boolean; error?: string }>
@@ -110,6 +117,16 @@ export interface ElectronAPI {
 export interface SyncStatus {
   isOnline: boolean
   pendingItems: number
+}
+
+export interface MobileScannerInfo {
+  url: string
+  lanIp: string
+  port: number
+  token: string
+  connectedDevices: number
+  /** Set if the WebSocket server failed to bind (e.g. port already in use). */
+  serverError: string | null
 }
 
 export interface UpdaterStatus {
