@@ -1,8 +1,14 @@
 import { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { QRCodeSVG } from 'qrcode.react'
-import { X, RefreshCw, Smartphone, Wifi, Copy, Check, AlertTriangle } from 'lucide-react'
+import { RefreshCw, Smartphone, Wifi, Copy, Check, AlertTriangle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import type { MobileScannerInfo } from '@/types/electron'
 
 interface Props {
@@ -59,209 +65,107 @@ export default function MobileScannerModal({ open, onClose }: Props) {
     setTimeout(() => setCopied(false), 1500)
   }
 
-  if (!open) return null
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Smartphone className="h-5 w-5 text-emerald-500" />
+            Scanner Mobile
+          </DialogTitle>
+          <DialogDescription>
+            Scannez ce QR code depuis l'application <strong className="text-foreground">OptiManage Scanner</strong> sur votre téléphone
+            pour le jumeler à ce poste. Les deux appareils doivent être sur le même réseau Wi‑Fi.
+          </DialogDescription>
+        </DialogHeader>
 
-  return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 100,
-        background: 'rgba(0,0,0,0.65)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '1rem',
-      }}
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--background, #fff)',
-          color: 'var(--foreground, #000)',
-          borderRadius: 12,
-          width: '100%',
-          maxWidth: 480,
-          padding: '1.5rem',
-          boxShadow: '0 10px 40px rgba(0,0,0,0.4)',
-        }}
-      >
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Smartphone size={22} />
-            <h2 style={{ fontSize: '1.15rem', fontWeight: 700, margin: 0 }}>Scanner Mobile</h2>
+        <div className="space-y-4 pt-2">
+          {/* QR or server-error banner */}
+          <div className="flex justify-center">
+            {info?.serverError ? (
+              <div className="w-[248px] min-h-[248px] flex flex-col items-center justify-center gap-3 p-4 rounded-lg border border-red-200 dark:border-red-800/50 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 text-center">
+                <AlertTriangle className="h-8 w-8" />
+                <strong>Serveur scanner mobile indisponible</strong>
+                <span className="text-xs opacity-90">{info.serverError}</span>
+              </div>
+            ) : (
+              <div className="bg-white p-3.5 rounded-lg border border-black/10 shadow-sm">
+                {info ? (
+                  <QRCodeSVG value={info.url} size={220} level="M" includeMargin={false} fgColor="#000000" bgColor="#FFFFFF" />
+                ) : (
+                  <div className="w-[220px] h-[220px] grid place-items-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          <button
-            onClick={onClose}
-            type="button"
-            aria-label="Fermer"
-            style={{ background: 'transparent', border: 0, cursor: 'pointer', padding: 4, color: 'inherit' }}
-          >
-            <X size={20} />
-          </button>
-        </div>
 
-        <p style={{ fontSize: '0.85rem', opacity: 0.75, marginTop: 0, marginBottom: '1rem' }}>
-          Scannez ce QR code depuis l'application <strong>OptiManage Scanner</strong> sur votre téléphone
-          pour le jumeler à ce poste. Les deux appareils doivent être sur le même réseau Wi‑Fi.
-        </p>
-
-        {/* QR or server-error banner */}
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '1rem' }}>
-          {info?.serverError ? (
-            <div
-              style={{
-                width: 248,
-                minHeight: 248,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 12,
-                padding: 16,
-                borderRadius: 10,
-                background: 'rgba(239,68,68,0.10)',
-                border: '1px solid rgba(239,68,68,0.45)',
-                color: 'rgb(239,68,68)',
-                textAlign: 'center',
-              }}
-            >
-              <AlertTriangle size={32} />
-              <strong>Serveur scanner mobile indisponible</strong>
-              <span style={{ fontSize: '0.85rem', opacity: 0.9, color: 'inherit' }}>
-                {info.serverError}
-              </span>
-            </div>
-          ) : (
-            <div
-              style={{
-                background: '#fff',
-                padding: 14,
-                borderRadius: 10,
-                border: '1px solid rgba(0,0,0,0.08)',
-              }}
-            >
-              {info ? (
-                <QRCodeSVG value={info.url} size={220} level="M" includeMargin={false} />
-              ) : (
-                <div style={{ width: 220, height: 220, display: 'grid', placeItems: 'center' }}>
-                  <div className="w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                </div>
-              )}
+          {/* Details */}
+          {info && !info.serverError && (
+            <div className="rounded-lg border border-border bg-muted/40 p-3 text-sm font-mono space-y-1">
+              <div className="flex items-center gap-2">
+                <Wifi className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-muted-foreground">IP locale&nbsp;:</span>
+                <strong className="text-foreground">{info.lanIp}</strong>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">Port&nbsp;:</span>
+                <strong className="text-foreground">{info.port}</strong>
+              </div>
+              <div className="pt-1">
+                <button
+                  onClick={handleCopy}
+                  type="button"
+                  className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md border border-border bg-background hover:bg-muted transition-colors"
+                >
+                  {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? 'Copié' : "Copier l'URL"}
+                </button>
+              </div>
             </div>
           )}
-        </div>
 
-        {/* Details */}
-        {info && (
+          {/* Connected devices badge */}
           <div
-            style={{
-              background: 'rgba(127,127,127,0.08)',
-              borderRadius: 8,
-              padding: '0.75rem 1rem',
-              fontSize: '0.85rem',
-              marginBottom: '1rem',
-              fontFamily: 'ui-monospace, "Cascadia Code", Menlo, monospace',
-            }}
+            className={`flex items-center justify-between rounded-lg px-3.5 py-2.5 text-sm font-semibold border transition-colors ${
+              connectedCount > 0
+                ? 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-300'
+                : 'bg-muted/40 border-border text-muted-foreground'
+            }`}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-              <Wifi size={14} />
-              <span>IP locale&nbsp;: <strong>{info.lanIp}</strong></span>
-            </div>
-            <div>Port&nbsp;: <strong>{info.port}</strong></div>
-            <div style={{ wordBreak: 'break-all', marginTop: 6 }}>
-              <button
-                onClick={handleCopy}
-                type="button"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  background: 'transparent',
-                  border: '1px solid rgba(127,127,127,0.3)',
-                  borderRadius: 6,
-                  padding: '4px 8px',
-                  cursor: 'pointer',
-                  color: 'inherit',
-                  fontSize: '0.8rem',
-                }}
-              >
-                {copied ? <Check size={14} /> : <Copy size={14} />}
-                {copied ? 'Copié' : 'Copier l\'URL'}
-              </button>
-            </div>
+            <span>
+              {connectedCount === 0
+                ? 'Aucun téléphone connecté'
+                : `${connectedCount} téléphone${connectedCount > 1 ? 's' : ''} connecté${connectedCount > 1 ? 's' : ''}`}
+            </span>
+            <span
+              className={`inline-block w-2 h-2 rounded-full ${
+                connectedCount > 0
+                  ? 'bg-emerald-500 ring-4 ring-emerald-500/25 animate-pulse'
+                  : 'bg-muted-foreground/40'
+              }`}
+            />
           </div>
-        )}
 
-        {/* Connected devices badge */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            background: connectedCount > 0 ? 'rgba(34,197,94,0.12)' : 'rgba(127,127,127,0.08)',
-            border: `1px solid ${connectedCount > 0 ? 'rgba(34,197,94,0.4)' : 'rgba(127,127,127,0.2)'}`,
-            color: connectedCount > 0 ? 'rgb(22,163,74)' : 'inherit',
-            borderRadius: 8,
-            padding: '0.6rem 0.9rem',
-            marginBottom: '1rem',
-            fontSize: '0.9rem',
-            fontWeight: 600,
-          }}
-        >
-          <span>
-            {connectedCount === 0
-              ? 'Aucun téléphone connecté'
-              : `${connectedCount} téléphone${connectedCount > 1 ? 's' : ''} connecté${connectedCount > 1 ? 's' : ''}`}
-          </span>
-          <span style={{
-            display: 'inline-block',
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: connectedCount > 0 ? 'rgb(34,197,94)' : 'rgb(127,127,127)',
-            boxShadow: connectedCount > 0 ? '0 0 0 4px rgba(34,197,94,0.2)' : 'none',
-            animation: connectedCount > 0 ? 'pulse 2s ease-in-out infinite' : 'none',
-          }} />
+          {/* Regenerate */}
+          <button
+            onClick={handleRegenerate}
+            type="button"
+            disabled={regenerating || !info}
+            className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-border bg-background hover:bg-muted transition-colors disabled:opacity-60 disabled:cursor-wait"
+          >
+            <RefreshCw className={`h-4 w-4 ${regenerating ? 'animate-spin' : ''}`} />
+            Régénérer le code
+          </button>
+
+          {/* Firewall hint */}
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            <strong className="text-foreground">Astuce&nbsp;:</strong> si le téléphone ne se connecte pas, autorisez le port&nbsp;
+            <strong className="text-foreground">{info?.port ?? 8765}</strong> dans le pare‑feu Windows pour OptiManage Desktop.
+          </p>
         </div>
-
-        {/* Regenerate */}
-        <button
-          onClick={handleRegenerate}
-          type="button"
-          disabled={regenerating || !info}
-          style={{
-            width: '100%',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            background: 'transparent',
-            border: '1px solid rgba(127,127,127,0.3)',
-            borderRadius: 8,
-            padding: '0.6rem 1rem',
-            cursor: regenerating ? 'wait' : 'pointer',
-            opacity: regenerating ? 0.6 : 1,
-            color: 'inherit',
-            fontSize: '0.9rem',
-            marginBottom: '1rem',
-          }}
-        >
-          <RefreshCw size={16} className={regenerating ? 'animate-spin' : ''} />
-          Régénérer le code
-        </button>
-
-        {/* Firewall hint */}
-        <p style={{ fontSize: '0.75rem', opacity: 0.65, margin: 0, lineHeight: 1.5 }}>
-          <strong>Astuce&nbsp;:</strong> si le téléphone ne se connecte pas, autorisez le port&nbsp;
-          <strong>{info?.port ?? 8765}</strong> dans le pare‑feu Windows pour OptiManage Desktop.
-        </p>
-      </div>
-    </div>,
-    document.body,
+      </DialogContent>
+    </Dialog>
   )
 }
