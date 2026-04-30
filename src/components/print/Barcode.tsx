@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, memo } from 'react'
 import JsBarcode from 'jsbarcode'
 
 interface BarcodeProps {
@@ -17,7 +17,7 @@ interface BarcodeProps {
  * Renders a barcode as inline SVG using JsBarcode.
  * Used in OrderSlip to encode the orderNumber for fast scan-to-open.
  */
-export default function Barcode({
+function BarcodeImpl({
   value,
   width = 1.4,
   height = 32,
@@ -65,3 +65,10 @@ export default function Barcode({
     />
   )
 }
+
+// Memoised: parent HalfPage re-renders whenever its internal `scale` state
+// updates (auto-fit measurement). Without memoisation, JsBarcode would
+// re-encode the SVG on every re-render — noticeable slowdown on low-end PCs
+// and a meaningful contributor to the slow print-preparation time.
+const Barcode = memo(BarcodeImpl)
+export default Barcode

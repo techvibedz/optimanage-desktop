@@ -55,13 +55,17 @@ export default function PrintOrderSlipPage() {
         .dark .slip-page { background: #0a0a0f; }
         .slip-toolbar { flex-shrink: 0; }
         .slip-scroll { flex: 1; overflow-y: auto; }
-        .print-slip-target { position: absolute; left: -9999px; top: 0; width: 148mm; height: 210mm; }
+        .slip-preview-wrapper { display: flex; justify-content: center; padding: 32px 16px 64px; }
+        .slip-preview { width: 148mm; height: 210mm; background: white; box-shadow: 0 4px 24px rgba(0,0,0,0.12); border-radius: 4px; overflow: hidden; }
+
         @media print {
-          html, body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
-          #root { visibility: hidden !important; height: 0 !important; overflow: hidden !important; }
-          .print-slip-target, .print-slip-target * { visibility: visible !important; }
-          .print-slip-target { position: fixed !important; left: 0 !important; top: 0 !important; width: 148mm !important; height: 210mm !important; margin: 0 !important; padding: 0 !important; overflow: hidden !important; z-index: 99999 !important; }
           @page { size: A5 portrait; margin: 0mm 0mm 4mm 0mm; }
+          html, body { margin: 0 !important; padding: 0 !important; background: white !important; overflow: hidden !important; }
+          .slip-toolbar { display: none !important; }
+          .slip-page { display: block !important; height: auto !important; overflow: visible !important; background: white !important; }
+          .slip-scroll { overflow: visible !important; height: auto !important; flex: initial !important; }
+          .slip-preview-wrapper { display: block !important; padding: 0 !important; }
+          .slip-preview { box-shadow: none !important; border-radius: 0 !important; margin: 0 !important; }
         }
       `}</style>
 
@@ -86,19 +90,14 @@ export default function PrintOrderSlipPage() {
           </button>
         </div>
 
-        {/* Scrollable preview */}
-        <div className="slip-scroll no-print">
-          <div style={{ display: 'flex', justifyContent: 'center', padding: '32px 16px 64px' }}>
-            <div style={{ width: '148mm', height: '210mm', background: 'white', boxShadow: '0 4px 24px rgba(0,0,0,0.12)', borderRadius: '4px', overflow: 'hidden' }}>
+        {/* Single OrderSlip instance — serves as both screen preview AND print target */}
+        <div className="slip-scroll">
+          <div className="slip-preview-wrapper">
+            <div className="slip-preview">
               <OrderSlip order={order} />
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Actual print target (hidden on screen, visible on print) */}
-      <div className="print-slip-target">
-        <OrderSlip order={order} />
       </div>
     </>
   )
