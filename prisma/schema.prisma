@@ -269,6 +269,7 @@ model Setting {
   opticianAddress String   @default("123 Main Street, City, Country")
   opticianPhone   String   @default("+1 234 567 8900")
   opticianEmail   String?
+  nif             String?
   logoUrl         String?
   language        String   @default("en")
   currency        String   @default("DA")

@@ -147,6 +147,7 @@ function initTables() {
       opticianAddress TEXT DEFAULT '',
       opticianPhone TEXT DEFAULT '',
       opticianEmail TEXT,
+      nif TEXT,
       logoUrl TEXT,
       language TEXT DEFAULT 'en',
       currency TEXT DEFAULT 'DA',
@@ -177,6 +178,17 @@ function initTables() {
       updatedAt TEXT NOT NULL
     );
   `)
+
+  // ─── Idempotent migrations for existing DBs ──────────────────────────────
+  // Add `nif` column to settings if upgrading from a build that didn't have it.
+  try {
+    const cols = d.prepare(`PRAGMA table_info(settings)`).all() as Array<{ name: string }>
+    if (!cols.some(c => c.name === 'nif')) {
+      d.exec(`ALTER TABLE settings ADD COLUMN nif TEXT`)
+    }
+  } catch (e) {
+    // Non-fatal: column probably already exists or table missing; safe to ignore.
+  }
 }
 
 // ─── Helper: convert Date fields to ISO strings for SQLite ──────────────────
@@ -274,10 +286,10 @@ export function cacheLensType(lt: any) {
 
 export function cacheSetting(s: any) {
   const d = getDb()
-  d.prepare(`INSERT OR REPLACE INTO settings (id,userId,opticianName,opticianAddress,opticianPhone,opticianEmail,logoUrl,language,currency,timezone,createdAt,updatedAt)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+  d.prepare(`INSERT OR REPLACE INTO settings (id,userId,opticianName,opticianAddress,opticianPhone,opticianEmail,nif,logoUrl,language,currency,timezone,createdAt,updatedAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     s.id, s.userId||null, s.opticianName||'', s.opticianAddress||'', s.opticianPhone||'',
-    s.opticianEmail||null, s.logoUrl||null, s.language||'en', s.currency||'DA', s.timezone||'Africa/Algiers',
+    s.opticianEmail||null, s.nif||null, s.logoUrl||null, s.language||'en', s.currency||'DA', s.timezone||'Africa/Algiers',
     toIso(s.createdAt), toIso(s.updatedAt)
   )
 }

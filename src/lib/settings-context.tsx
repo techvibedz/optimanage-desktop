@@ -7,6 +7,7 @@ export interface Settings {
   opticianAddress: string
   opticianPhone: string
   opticianEmail?: string
+  nif?: string
   logoUrl?: string
   language: Language
   currency: string

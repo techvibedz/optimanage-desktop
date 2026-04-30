@@ -36,6 +36,7 @@ export default function SettingsPage() {
     opticianAddress: settings.opticianAddress,
     opticianPhone: settings.opticianPhone,
     opticianEmail: settings.opticianEmail || '',
+    nif: settings.nif || '',
     logoUrl: settings.logoUrl || '',
     language: settings.language,
     currency: settings.currency,
@@ -134,6 +135,18 @@ export default function SettingsPage() {
               <input type="email" value={form.opticianEmail} onChange={e => setForm(p => ({ ...p, opticianEmail: e.target.value }))}
                 className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background mt-1" />
             </div>
+          </div>
+          <div>
+            <label className="text-sm font-medium text-muted-foreground">{t('settings.shopNif')}</label>
+            <input
+              value={form.nif}
+              onChange={e => setForm(p => ({ ...p, nif: e.target.value }))}
+              placeholder="ex: 0001234567890"
+              inputMode="numeric"
+              maxLength={20}
+              className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background mt-1 font-mono"
+            />
+            <p className="text-xs text-muted-foreground mt-1">{t('settings.shopNifHint')}</p>
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div>

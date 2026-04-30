@@ -302,8 +302,13 @@ export default function AlgerianFacture({ order, onClose }: AlgerianFactureProps
           <div className="company-info" style={{ flex: '1.8' }}>
             <div className="company-name">{settings?.opticianName || 'OPTICIEN OPTOMÉTRISTE'}</div>
             <div className="company-details">
-              {settings?.opticianAddress || 'Adresse non définie'}<br />
-              {settings?.opticianPhone && settings.opticianPhone}
+              {settings?.opticianAddress || 'Adresse non définie'}
+              {settings?.nif && (
+                <>
+                  <br />
+                  <span style={{ fontWeight: 700, letterSpacing: '0.3px' }}>NIF&nbsp;: {settings.nif}</span>
+                </>
+              )}
             </div>
           </div>
         </div>
