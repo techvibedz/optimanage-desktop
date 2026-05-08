@@ -1,4 +1,5 @@
 import pino from 'pino'
+import { app } from 'electron'
 
 const REDACTED = '***REDACTED***'
 
@@ -45,7 +46,7 @@ function redactSecrets(obj: unknown): unknown {
   return obj
 }
 
-const isDev = !process.env.NODE_ENV || process.env.NODE_ENV === 'development'
+const isDev = !app.isPackaged
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || (isDev ? 'debug' : 'info'),
