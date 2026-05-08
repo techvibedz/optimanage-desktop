@@ -7,6 +7,8 @@ import os from 'node:os'
 import crypto from 'node:crypto'
 import Module from 'node:module'
 import { WebSocketServer, WebSocket } from 'ws'
+import { logger, logInfo, logError } from './logger'
+import { initMonitoring, captureException, closeMonitoring, getIpcTimings } from './monitoring'
 
 // ─── Prisma: redirect requires to extraResources in production ───────────────
 if (app.isPackaged) {
@@ -88,6 +90,21 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // ── Monitoring ──────────────────────────────────────────────────────────
+  const appVersion = app.getVersion()
+  initMonitoring(appVersion)
+  logInfo('App starting', { version: appVersion, electron: process.versions.electron, node: process.versions.node, platform: process.platform })
+
+  process.on('uncaughtException', (err) => {
+    captureException(err, { type: 'uncaughtException' })
+    logError('Uncaught exception', err)
+  })
+  process.on('unhandledRejection', (reason) => {
+    const err = reason instanceof Error ? reason : new Error(String(reason))
+    captureException(err, { type: 'unhandledRejection' })
+    logError('Unhandled rejection', err)
+  })
+
   // Allow camera/mic for the in-app barcode scanner (local app, trusted origin)
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     if (permission === 'media' || permission === 'mediaKeySystem') return callback(true)
@@ -100,6 +117,10 @@ app.whenReady().then(() => {
 
   registerIpcHandlers()
   registerAiHandlers()
+
+  // ── Monitoring IPC ──────────────────────────────────────────────────────
+  ipcMain.handle('monitoring:timings', async () => getIpcTimings())
+
   createWindow()
 
   // ── Auto Update (React UI — no native dialogs) ──────────────────────────
@@ -1506,5 +1527,7 @@ You MUST respond with ONLY a valid JSON object, no markdown, no explanation, no 
 
 // Disconnect Prisma on quit
 app.on('before-quit', async () => {
+  logInfo('App shutting down')
+  closeMonitoring()
   await prisma.$disconnect()
 })
