@@ -256,17 +256,28 @@ app.whenReady().then(() => {
   const mobileScannerClients = new Set<WebSocket>()
 
   const getLanIPv4 = (): string => {
+    const VIRTUAL_PATTERNS = /vmware|virtualbox|docker|hyper-v|vethernet|bluetooth|teredo|tap-windows|wintun|zerotier|tailscale|nordlynx|pangp|loopback|tunnel|pseudo/i
+    const PREFERRED_PATTERNS = /wi-fi|wifi|wlan|ethernet|eth|local area/i
+
     const ifaces = os.networkInterfaces()
-    for (const list of Object.values(ifaces)) {
+    const candidates: { name: string; address: string; preferred: boolean }[] = []
+
+    for (const [name, list] of Object.entries(ifaces)) {
       if (!list) continue
+      if (VIRTUAL_PATTERNS.test(name)) continue // skip virtual adapters
+      const preferred = PREFERRED_PATTERNS.test(name)
       for (const net of list) {
-        // Node typings: family is 'IPv4' on >=18, was 4 on older versions.
         const isV4 = (net.family as any) === 'IPv4' || (net.family as any) === 4
         if (isV4 && !net.internal && net.address && !net.address.startsWith('127.')) {
-          return net.address
+          candidates.push({ name, address: net.address, preferred })
         }
       }
     }
+
+    // Prefer real hardware (Wi-Fi/Ethernet), then fall back to any non-virtual.
+    const preferred = candidates.find((c) => c.preferred)
+    if (preferred) return preferred.address
+    if (candidates.length > 0) return candidates[0].address
     return '127.0.0.1'
   }
 
@@ -369,6 +380,7 @@ app.whenReady().then(() => {
 
   const buildPairingInfo = () => {
     const ip = getLanIPv4()
+    console.log(`[MobileScanner] Pairing URL uses IP: ${ip}`)
     return {
       url: `ws://${ip}:${MOBILE_SCANNER_PORT}/?token=${mobileScannerToken}`,
       lanIp: ip,
