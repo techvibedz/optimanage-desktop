@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Dashboard
   getDashboardStats: (params: any) => ipcRenderer.invoke('dashboard:stats', params),
+  getRevenueTimeline: (params: any) => ipcRenderer.invoke('dashboard:revenueTimeline', params),
   getRecentActivity: (params: any) => ipcRenderer.invoke('dashboard:recentActivity', params),
 
   // AI

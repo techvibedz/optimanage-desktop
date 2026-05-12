@@ -27,6 +27,8 @@ export default defineConfig({
                 'bufferutil',
                 'utf-8-validate',
                 '@sentry/electron',
+                '@sentry/electron/main',
+                '@sentry/electron/renderer',
               ],
             },
           },

@@ -154,6 +154,7 @@ export const translations: Record<Language, Translations> = {
     'dashboard.noOrders': 'No orders yet',
     'dashboard.recentActivity': 'Recent Activity',
     'dashboard.noActivity': 'No activity yet',
+    'dashboard.revenueFlow': 'Revenue Flow',
 
     // Common (continued)
     'common.viewAll': 'View All',
@@ -631,6 +632,7 @@ export const translations: Record<Language, Translations> = {
     'dashboard.noOrders': 'Aucune commande',
     'dashboard.recentActivity': 'Activit\u00e9 r\u00e9cente',
     'dashboard.noActivity': 'Aucune activit\u00e9',
+    'dashboard.revenueFlow': 'Flux de revenus',
 
     'common.viewAll': 'Voir tout',
 

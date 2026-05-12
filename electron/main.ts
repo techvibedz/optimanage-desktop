@@ -8,7 +8,7 @@ import crypto from 'node:crypto'
 import Module from 'node:module'
 import { WebSocketServer, WebSocket } from 'ws'
 import { logger, logInfo, logError } from './logger'
-import { initMonitoring, captureException, closeMonitoring, getIpcTimings } from './monitoring'
+import { initMonitoring, captureException, closeMonitoring, getIpcTimings } from './monitoring-stub'
 
 // ─── Prisma: redirect requires to extraResources in production ───────────────
 if (app.isPackaged) {
@@ -1311,6 +1311,7 @@ function registerIpcHandlers() {
           totalPrescriptions,
           totalRevenue: formattedRevenue,
           totalPayments: formattedPayments,
+          totalOrderAmount: Math.round(orderAmountsTotal),
           customerGrowth,
           orderGrowth,
           prescriptionGrowth,
@@ -1327,6 +1328,99 @@ function registerIpcHandlers() {
           currency: 'DA',
         },
       }
+    } catch (err: any) {
+      return { error: err.message }
+    }
+  })
+
+  // ── Dashboard: Revenue Timeline (daily grouped) ─────────────────────────
+  ipcMain.handle('dashboard:revenueTimeline', async (_e, params: any) => {
+    try {
+      const { userId, filter = 'month', startDate: startParam, endDate: endParam } = params
+      const now = new Date()
+
+      let startDate: Date
+      let endDate = new Date(now)
+
+      switch (filter) {
+        case 'today':
+          startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+          break
+        case 'week': {
+          const day = now.getDay()
+          startDate = new Date(now)
+          startDate.setDate(now.getDate() - day)
+          startDate.setHours(0, 0, 0, 0)
+          break
+        }
+        case 'month':
+          startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+          break
+        case 'custom':
+          startDate = startParam ? new Date(startParam) : new Date(now.getFullYear(), now.getMonth(), 1)
+          if (endParam) {
+            endDate = new Date(endParam)
+            endDate.setHours(23, 59, 59, 999)
+          }
+          break
+        default:
+          startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1)
+          break
+      }
+
+      const payments = await prisma.payment.findMany({
+        where: {
+          OR: [{ order: { userId } }, { userId }],
+          paymentDate: { gte: startDate, lte: endDate },
+        },
+        select: { amount: true, paymentDate: true },
+        orderBy: { paymentDate: 'asc' },
+      })
+
+      const expenses = await prisma.expense.findMany({
+        where: {
+          userId,
+          date: { gte: startDate, lte: endDate },
+        },
+        select: { amount: true, date: true },
+        orderBy: { date: 'asc' },
+      })
+
+      // Group by day
+      const dayMap = new Map<string, { revenue: number; expenses: number }>()
+
+      // Fill all days in range
+      const cursor = new Date(startDate)
+      while (cursor <= endDate) {
+        const key = cursor.toISOString().slice(0, 10)
+        dayMap.set(key, { revenue: 0, expenses: 0 })
+        cursor.setDate(cursor.getDate() + 1)
+      }
+
+      for (const p of payments) {
+        const key = new Date(p.paymentDate).toISOString().slice(0, 10)
+        const entry = dayMap.get(key)
+        if (entry) entry.revenue += p.amount
+        else dayMap.set(key, { revenue: p.amount, expenses: 0 })
+      }
+
+      for (const e of expenses) {
+        const key = new Date(e.date).toISOString().slice(0, 10)
+        const entry = dayMap.get(key)
+        if (entry) entry.expenses += e.amount
+        else dayMap.set(key, { revenue: 0, expenses: e.amount })
+      }
+
+      const timeline = Array.from(dayMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([date, vals]) => ({
+          date,
+          revenue: Math.round(vals.revenue),
+          expenses: Math.round(vals.expenses),
+          net: Math.round(vals.revenue - vals.expenses),
+        }))
+
+      return { data: timeline }
     } catch (err: any) {
       return { error: err.message }
     }

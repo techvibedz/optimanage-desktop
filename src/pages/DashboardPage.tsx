@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from '@/lib/use-translation'
 import { useAuth } from '@/lib/auth-context'
+import RevenueChart from '@/components/RevenueChart'
 
 interface DashboardStats {
   totalCustomers: number
@@ -14,6 +15,7 @@ interface DashboardStats {
   totalPrescriptions: number
   totalRevenue: number
   totalPayments: number
+  totalOrderAmount: number
   lastUpdated: string
   customerGrowth: number
   orderGrowth: number
@@ -25,7 +27,7 @@ interface DashboardStats {
 
 const defaultStats: DashboardStats = {
   totalCustomers: 0, ordersThisMonth: 0, totalPrescriptions: 0,
-  totalRevenue: 0, totalPayments: 0, lastUpdated: '',
+  totalRevenue: 0, totalPayments: 0, totalOrderAmount: 0, lastUpdated: '',
   customerGrowth: 0, orderGrowth: 0, prescriptionGrowth: 0, revenueGrowth: 0,
   paymentMethodBreakdown: [],
   revenueAnalytics: { deposits: 0, payments: 0, outstanding: 0, collectionRate: 0 },
@@ -46,35 +48,47 @@ export default function DashboardPage() {
   })
   const [recentOrders, setRecentOrders] = useState<any[]>([])
   const [activities, setActivities] = useState<any[]>([])
+  const [timeline, setTimeline] = useState<{ date: string; revenue: number; expenses: number; net: number }[]>([])
 
   useEffect(() => {
-    // Fire both in parallel — no sequential awaiting
-    fetchStats(activeFilter)
-    fetchRecentData()
-  }, [])
+    if (user?.id) {
+      fetchAll(activeFilter)
+    }
+  }, [user?.id])
 
-  const fetchRecentData = async () => {
-    if (!user?.id) return
-    try {
-      const [ordersRes, activityRes] = await Promise.all([
-        window.electronAPI.getOrders({ userId: user.id, page: 1, limit: 5 }),
-        window.electronAPI.getRecentActivity({ userId: user.id, limit: 8 }),
-      ])
-      if (ordersRes.data) setRecentOrders(ordersRes.data.orders || ordersRes.data)
-      if (activityRes.data) setActivities(activityRes.data)
-    } catch (err) { console.error('Error fetching recent data:', err) }
-  }
-
-  const fetchStats = async (filter: string, startDate?: string, endDate?: string) => {
+  const fetchAll = async (filter: string, startDate?: string, endDate?: string) => {
     if (!user?.id) return
     setLoading(true)
     try {
-      const result = await window.electronAPI.getDashboardStats({ userId: user.id, filter, startDate, endDate })
-      if (result.data) {
-        setStats({ ...defaultStats, ...result.data })
-      }
+      const [statsRes, ordersRes, activityRes, timelineRes] = await Promise.all([
+        window.electronAPI.getDashboardStats({ userId: user.id, filter, startDate, endDate }),
+        window.electronAPI.getOrders({ userId: user.id, page: 1, limit: 5 }),
+        window.electronAPI.getRecentActivity({ userId: user.id, limit: 8 }),
+        window.electronAPI.getRevenueTimeline({ userId: user.id, filter, startDate, endDate }),
+      ])
+      if (statsRes.data) setStats({ ...defaultStats, ...statsRes.data })
+      if (ordersRes.data) setRecentOrders(ordersRes.data.orders || ordersRes.data)
+      if (activityRes.data) setActivities(activityRes.data)
+      if (timelineRes.data) setTimeline(timelineRes.data)
     } catch (err) {
-      console.error('Error fetching stats:', err)
+      console.error('Error fetching dashboard:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchFiltered = async (filter: string, startDate?: string, endDate?: string) => {
+    if (!user?.id) return
+    setLoading(true)
+    try {
+      const [statsRes, timelineRes] = await Promise.all([
+        window.electronAPI.getDashboardStats({ userId: user.id, filter, startDate, endDate }),
+        window.electronAPI.getRevenueTimeline({ userId: user.id, filter, startDate, endDate }),
+      ])
+      if (statsRes.data) setStats({ ...defaultStats, ...statsRes.data })
+      if (timelineRes.data) setTimeline(timelineRes.data)
+    } catch (err) {
+      console.error('Error fetching dashboard:', err)
     } finally {
       setLoading(false)
     }
@@ -84,17 +98,15 @@ export default function DashboardPage() {
     setActiveFilter(filter)
     if (filter === 'custom') {
       setShowDatePicker(true)
-      if (customStart && customEnd) fetchStats('custom', customStart, customEnd)
+      if (customStart && customEnd) fetchFiltered('custom', customStart, customEnd)
     } else {
       setShowDatePicker(false)
-      fetchStats(filter)
+      fetchFiltered(filter)
     }
   }
 
   const handleCustomDateApply = () => {
-    if (customStart && customEnd) {
-      fetchStats('custom', customStart, customEnd)
-    }
+    if (customStart && customEnd) fetchFiltered('custom', customStart, customEnd)
   }
 
   const handlePriceToggle = () => {
@@ -123,17 +135,17 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">{greeting()}</h1>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="truncate text-2xl font-bold text-foreground">{greeting()}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">{t('dashboard.subtitle')}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
           <button onClick={handlePriceToggle}
             className="p-2.5 rounded-xl bg-white dark:bg-gray-800 border border-border/50 hover:bg-muted transition-all" title={showPriceStats ? 'Hide amounts' : 'Show amounts'}>
             {showPriceStats ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
           </button>
-          <button onClick={() => { fetchStats(activeFilter); fetchRecentData() }}
+          <button onClick={() => fetchAll(activeFilter)}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white dark:bg-gray-800 border border-border/50 hover:bg-muted transition-all text-sm font-medium ${loading ? 'opacity-60 pointer-events-none' : ''}`}>
             <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             {t('dashboard.refreshData') || 'Refresh'}
@@ -156,12 +168,12 @@ export default function DashboardPage() {
           ))}
         </div>
         {showDatePicker && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-border bg-white dark:bg-gray-800 text-sm" />
+              className="min-w-0 flex-1 sm:flex-none px-3 py-2 rounded-lg border border-border bg-white dark:bg-gray-800 text-sm" />
             <span className="text-muted-foreground text-sm">→</span>
             <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-border bg-white dark:bg-gray-800 text-sm" />
+              className="min-w-0 flex-1 sm:flex-none px-3 py-2 rounded-lg border border-border bg-white dark:bg-gray-800 text-sm" />
             <button onClick={handleCustomDateApply}
               disabled={!customStart || !customEnd}
               className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none">
@@ -172,7 +184,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Stats Grid — 4 columns */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Customers */}
         <div className="bg-white dark:bg-gray-800/50 rounded-2xl border border-border/50 p-5 hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between mb-3">
@@ -210,7 +222,7 @@ export default function DashboardPage() {
             </div>
             <GrowthBadge value={stats.revenueGrowth} />
           </div>
-          <p className="text-2xl font-bold">{loading ? '—' : fmtAmount(stats.totalRevenue)}</p>
+          <p className="truncate text-2xl font-bold" title={loading ? undefined : String(stats.totalRevenue)}>{loading ? '—' : fmtAmount(stats.totalRevenue)}</p>
           <p className="text-xs text-muted-foreground mt-1">{t('dashboard.totalRevenue') || 'Revenue'}</p>
         </div>
 
@@ -221,15 +233,30 @@ export default function DashboardPage() {
               <BarChart3 className="h-5 w-5 text-purple-600 dark:text-purple-400" />
             </div>
           </div>
-          <p className="text-2xl font-bold">{loading ? '—' : `${stats.revenueAnalytics.collectionRate}%`}</p>
+          <p className="truncate text-2xl font-bold" title={loading ? undefined : `${stats.revenueAnalytics.collectionRate}%`}>{loading ? '—' : `${stats.revenueAnalytics.collectionRate}%`}</p>
           <p className="text-xs text-muted-foreground mt-1">{t('dashboard.collectionRate') || 'Collection Rate'}</p>
         </div>
+      </div>
+
+      {/* Revenue Timeline Chart */}
+      <div className="bg-white dark:bg-gray-800/50 rounded-2xl border border-border/50 p-5">
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-primary" />
+            <h2 className="text-base font-semibold text-foreground">{t('dashboard.revenueFlow') || 'Revenus'}</h2>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <span className="w-2 h-2 rounded-full bg-blue-500" />
+            <span>Bénéfice net / jour</span>
+          </div>
+        </div>
+        <RevenueChart data={timeline} showAmounts={showPriceStats} loading={loading} />
       </div>
 
       {/* Quick Actions */}
       <div>
         <h2 className="text-base font-semibold text-foreground mb-3">{t('dashboard.quickActions')}</h2>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {[
             { to: '/customers', icon: Users, color: 'blue', title: t('dashboard.addCustomer'), desc: t('dashboard.createCustomerDesc') },
             { to: '/orders/new', icon: ShoppingCart, color: 'green', title: t('dashboard.createOrder'), desc: t('dashboard.createOrderDesc') },
@@ -246,12 +273,12 @@ export default function DashboardPage() {
               }`}>
                 <action.icon className="h-4 w-4" />
               </div>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">{action.title}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{action.desc}</p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-foreground">{action.title}</p>
+                  <p className="line-clamp-2 text-xs text-muted-foreground mt-0.5">{action.desc}</p>
                 </div>
-                <ArrowRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                <ArrowRight className="h-4 w-4 flex-shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
               </div>
             </Link>
           ))}
@@ -285,7 +312,7 @@ export default function DashboardPage() {
                 const statusLabel = order.status?.replace('_', ' ') || 'pending'
                 return (
                   <Link key={order.id || i} to={`/orders`}
-                    className="flex items-center justify-between p-3 rounded-xl hover:bg-muted/50 transition-colors no-underline group">
+                    className="flex flex-col gap-2 p-3 rounded-xl hover:bg-muted/50 transition-colors no-underline group sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center flex-shrink-0">
                         <FileText className="h-4 w-4 text-blue-600 dark:text-blue-400" />
@@ -302,11 +329,11 @@ export default function DashboardPage() {
                         </p>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 flex-shrink-0">
+                    <div className="flex items-center justify-between gap-3 sm:flex-shrink-0 sm:justify-end">
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize ${statusColors[order.status] || statusColors.pending}`}>
                         {statusLabel}
                       </span>
-                      <span className="text-sm font-semibold">{fmtAmount(order.totalPrice || 0)}</span>
+                      <span className="truncate text-sm font-semibold sm:max-w-28" title={String(order.totalPrice || 0)}>{fmtAmount(order.totalPrice || 0)}</span>
                     </div>
                   </Link>
                 )

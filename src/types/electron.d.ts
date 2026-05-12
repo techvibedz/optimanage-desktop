@@ -91,6 +91,7 @@ export interface ElectronAPI {
 
   // Dashboard
   getDashboardStats: (params: any) => Promise<{ data?: any; error?: string }>
+  getRevenueTimeline: (params: any) => Promise<{ data?: { date: string; revenue: number; expenses: number; net: number }[]; error?: string }>
   getRecentActivity: (params: any) => Promise<{ data?: any[]; error?: string }>
 
   // AI
