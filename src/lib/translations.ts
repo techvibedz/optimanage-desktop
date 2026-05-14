@@ -76,6 +76,7 @@ export const translations: Record<Language, Translations> = {
     'common.add': 'Add',
     'common.update': 'Update',
     'common.close': 'Close',
+    'common.dismiss': 'Dismiss',
     'common.view': 'View',
     'common.back': 'Back',
     'common.next': 'Next',
@@ -161,6 +162,10 @@ export const translations: Record<Language, Translations> = {
 
     // Offline overlay
     'offline.title': 'No Internet Connection',
+    'offline.banner': 'Offline Mode — You can still work. Changes will sync when connection is restored.',
+    'offline.syncing': 'Syncing {count} pending changes...',
+    'offline.backOnline': 'Back Online — All changes synced.',
+    'offline.pending': 'pending',
     'offline.message': 'Please check your internet connection and try again. The application requires an active connection to work.',
     'offline.waiting': 'Waiting for connection...',
 
@@ -553,6 +558,7 @@ export const translations: Record<Language, Translations> = {
     'common.add': 'Ajouter',
     'common.update': 'Mettre \u00e0 jour',
     'common.close': 'Fermer',
+    'common.dismiss': 'Ignorer',
     'common.view': 'Voir',
     'common.back': 'Retour',
     'common.next': 'Suivant',
@@ -638,6 +644,10 @@ export const translations: Record<Language, Translations> = {
 
     // Offline overlay
     'offline.title': 'Pas de connexion Internet',
+    'offline.banner': 'Mode hors-ligne — Vous pouvez continuer à travailler. Les modifications seront synchronisées une fois la connexion rétablie.',
+    'offline.syncing': 'Synchronisation de {count} modifications en attente...',
+    'offline.backOnline': 'De retour en ligne — Toutes les modifications sont synchronisées.',
+    'offline.pending': 'en attente',
     'offline.message': "Vérifiez votre connexion Internet et réessayez. L'application nécessite une connexion active pour fonctionner.",
     'offline.waiting': 'En attente de connexion...',
 

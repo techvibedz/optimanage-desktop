@@ -27,6 +27,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     checkSession()
   }, [])
 
+  useEffect(() => {
+    const unsub = window.electronAPI?.onLoggedOut?.(() => {
+      console.warn('[Auth] Server reported session invalid — logging out')
+      setUser(null)
+      navigate('/login')
+    })
+    return () => { unsub?.() }
+  }, [navigate])
+
   const checkSession = async () => {
     try {
       const result = await window.electronAPI.getSession()

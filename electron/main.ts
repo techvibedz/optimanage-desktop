@@ -9,6 +9,8 @@ import Module from 'node:module'
 import { WebSocketServer, WebSocket } from 'ws'
 import { logger, logInfo, logError } from './logger'
 import { initMonitoring, captureException, closeMonitoring, getIpcTimings } from './monitoring-stub'
+import * as localCache from './localCache'
+import * as syncManager from './syncManager'
 
 // ─── Prisma: redirect requires to extraResources in production ───────────────
 if (app.isPackaged) {
@@ -34,7 +36,7 @@ if (app.isPackaged) {
 
 // ─── Env Config ───────────────────────────────────────────────────────────────
 const envPath = app.isPackaged
-  ? path.join(process.resourcesPath, '.env')
+  ? path.join(process.resourcesPath, '.env.production')
   : path.join(app.getAppPath(), '.env')
 if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, 'utf-8')
@@ -118,6 +120,30 @@ app.whenReady().then(() => {
   registerIpcHandlers()
   registerAiHandlers()
 
+  // Seed a default offline user so the app can be used without first going online
+  ;(async () => {
+    try {
+      const d = localCache.getDb()
+      const count = (d.prepare('SELECT COUNT(*) as c FROM users').get() as any)?.c || 0
+      if (count === 0) {
+        const hashedPassword = await bcrypt.hash('admin123', 10)
+        const now = new Date().toISOString()
+        localCache.cacheUser({
+          id: 'local_default_admin',
+          email: 'admin@optimanage.local',
+          name: 'Offline Admin',
+          password: hashedPassword,
+          role: 'ADMIN',
+          createdAt: now,
+          updatedAt: now,
+        })
+        console.log('[LocalCache] Seeded default offline user: admin@optimanage.local / admin123')
+      }
+    } catch (err: any) {
+      console.warn('[LocalCache] Seed failed:', err?.message || err)
+    }
+  })()
+
   // ── Monitoring IPC ──────────────────────────────────────────────────────
   ipcMain.handle('monitoring:timings', async () => getIpcTimings())
 
@@ -195,16 +221,292 @@ app.whenReady().then(() => {
         lastOnlineStatus = online
         mainWindow?.webContents.send('connectivity:status', online)
         console.log(`[Connectivity] Status changed: ${online ? 'ONLINE' : 'OFFLINE'}`)
+        if (online) {
+          markDbReachable()
+          hydrateCurrentUserCache('connectivity-restored').catch(() => {})
+        } else {
+          markDbUnreachable()
+        }
       }
     } catch { /* ignore */ }
   }
   setInterval(checkConnectivity, 3000)
   // Initial check after a short delay (let the window load first)
-  setTimeout(checkConnectivity, 1000)
+  setTimeout(() => {
+    checkConnectivity()
+    hydrateCurrentUserCache('app-start-session-restore', true).catch(() => {})
+  }, 1000)
 
   ipcMain.handle('connectivity:check', () => {
     try { return net.isOnline() } catch { return true }
   })
+
+  // ── Sync queue status for the renderer ─────────────────────────────────
+  ipcMain.handle('sync:status', () => ({
+    pendingItems: currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength(),
+    isOnline: syncManager.isOnline(),
+  }))
+
+  ipcMain.handle('sync:hydrate', async () => {
+    const ok = await hydrateCurrentUserCache('manual-sync-hydrate', true)
+    return {
+      success: ok,
+      pendingItems: currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength(),
+      isOnline: syncManager.isOnline(),
+    }
+  })
+
+  // When connectivity is restored, trigger sync processing
+  let syncInProgress = false
+  async function processSyncQueue() {
+    if (syncInProgress) return
+    if (!isDbAvailable()) return
+    syncInProgress = true
+    {
+      // Ensure Prisma connection is fresh after offline period
+      try { await prisma.$connect() } catch (e: any) {
+        console.warn('[Sync] Prisma reconnect failed, skipping sync:', e?.message)
+        markDbUnreachable()
+        syncInProgress = false
+        return
+      }
+      // Verify DB is actually queryable with a lightweight check
+      try {
+        await prisma.$queryRaw`SELECT 1`
+        markDbReachable()
+      } catch (e: any) {
+        console.warn('[Sync] DB not queryable, skipping sync:', e?.message?.slice(0, 200))
+        markDbUnreachable()
+        syncInProgress = false
+        return
+      }
+      await repairSessionUserId()
+      if (!currentUser) { syncInProgress = false; return }
+      queueUnsyncedLocalRecords(currentUser.id)
+      if ((currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength()) === 0) { syncInProgress = false; return }
+      const handlers: Record<string, (payload: any) => Promise<any>> = {
+        'customers:create': async (p) => {
+          // Resolve userId from server — try multiple strategies
+          let resolvedUserId: string | null = null
+          if (currentUser?.email) {
+            try {
+              const serverUser = await prisma.user.findUnique({ where: { email: currentUser.email }, select: { id: true } })
+              if (serverUser) resolvedUserId = serverUser.id
+              else console.warn(`[Sync] No server user found for email ${currentUser.email}`)
+            } catch (e: any) {
+              console.warn(`[Sync] userId lookup failed: ${e?.message || e}`)
+            }
+          }
+          // Fallback: use currentUser.id (repaired by repairSessionUserId earlier)
+          if (!resolvedUserId && currentUser?.id) resolvedUserId = currentUser.id
+          // Last resort: queued value
+          if (!resolvedUserId) resolvedUserId = p.userId
+          if (!resolvedUserId) throw new Error('No userId resolved — cannot sync customer')
+
+          const fields: any = pickFields(p, CUSTOMER_FIELDS)
+          fields.userId = resolvedUserId
+          // Strip any stale date strings that Prisma might reject
+          if (fields.dateOfBirth === '' || fields.dateOfBirth === 'null') delete fields.dateOfBirth
+          console.log('[Sync] Creating customer with userId:', fields.userId, 'sessionId:', currentUser?.id, 'queuedId:', p.userId)
+          const data = await prisma.customer.create({ data: fields })
+          if (p.localId) {
+            localCache.cacheLocalIdMapping(p.localId, data.id, 'customer')
+            localCache.deleteSyncedLocalCustomer(p.localId)
+          }
+          return data
+        },
+        'customers:update': (p) => prisma.customer.update({ where: { id: p.id }, data: pickFields(p.updates, CUSTOMER_FIELDS) }),
+        'customers:delete': (p) => prisma.customer.delete({ where: { id: p.id } }),
+        'orders:create': async (p) => {
+          const picked: any = pickFields(p, ORDER_FIELDS)
+          // Resolve userId from server with fallback chain
+          let resolvedUserId: string | null = null
+          if (currentUser?.email) {
+            try {
+              const serverUser = await prisma.user.findUnique({ where: { email: currentUser.email }, select: { id: true } })
+              if (serverUser) resolvedUserId = serverUser.id
+              else console.warn(`[Sync] No server user found for email ${currentUser.email}`)
+            } catch (e: any) {
+              console.warn(`[Sync] userId lookup failed for order: ${e?.message || e}`)
+            }
+          }
+          if (!resolvedUserId && currentUser?.id) resolvedUserId = currentUser.id
+          if (!resolvedUserId) resolvedUserId = picked.userId
+          if (!resolvedUserId) throw new Error('No userId resolved — cannot sync order')
+          picked.userId = resolvedUserId
+          if (typeof picked.customerId === 'string' && picked.customerId.startsWith('local_')) {
+            const mappedCustomerId = localCache.getLocalIdMapping(picked.customerId)
+            if (mappedCustomerId) picked.customerId = mappedCustomerId
+          }
+          if (typeof picked.prescriptionId === 'string' && picked.prescriptionId.startsWith('local_')) {
+            const mappedPrescriptionId = localCache.getLocalIdMapping(picked.prescriptionId)
+            if (mappedPrescriptionId) picked.prescriptionId = mappedPrescriptionId
+          }
+          if (typeof picked.customerId === 'string' && picked.customerId.startsWith('local_')) throw new Error(`Unresolved local customer reference: ${picked.customerId}`)
+          // If prescription is still local_, try to sync it from local SQLite inline
+          if (typeof picked.prescriptionId === 'string' && picked.prescriptionId.startsWith('local_')) {
+            const localRx = localCache.getLocalPrescription(picked.prescriptionId)
+            if (localRx) {
+              const rxFields: any = pickFields({ ...localRx, hasVLData: Boolean(localRx.hasVLData), hasVPData: Boolean(localRx.hasVPData) }, PRESCRIPTION_FIELDS)
+              // Resolve prescription's customerId from local_ to server ID
+              if (typeof rxFields.customerId === 'string' && rxFields.customerId.startsWith('local_')) {
+                const mappedCust = localCache.getLocalIdMapping(rxFields.customerId)
+                rxFields.customerId = mappedCust || picked.customerId
+              }
+              console.log(`[Sync] Inline-syncing prescription ${picked.prescriptionId} for order`)
+              const rxResult = await prisma.prescription.create({ data: rxFields })
+              localCache.cacheLocalIdMapping(picked.prescriptionId, rxResult.id, 'prescription')
+              picked.prescriptionId = rxResult.id
+            } else {
+              console.warn(`[Sync] Prescription ${picked.prescriptionId} not found locally — creating order without it`)
+              picked.prescriptionId = null
+            }
+          }
+          console.log('[Sync] Creating order for userId:', picked.userId, 'customerId:', picked.customerId)
+          const depositAmount = Number(picked.depositAmount || 0)
+          const frameId = picked.frameId
+          const localCustomerId = typeof p.customerId === 'string' && p.customerId.startsWith('local_') ? p.customerId : null
+          const localPrescriptionId = typeof p.prescriptionId === 'string' && p.prescriptionId.startsWith('local_') ? p.prescriptionId : null
+
+          // Recompute order number server-side to avoid duplicates.
+          const allOrders = await prisma.order.findMany({ where: { userId: picked.userId }, select: { orderNumber: true } })
+          let maxNum = 0
+          for (const o of allOrders) {
+            const match = o.orderNumber?.match(/ORD-(\d+)/)
+            if (match) { const num = parseInt(match[1], 10); if (num > maxNum) maxNum = num }
+          }
+          picked.orderNumber = `ORD-${String(maxNum + 1).padStart(3, '0')}`
+
+          const data = await prisma.order.create({ data: picked })
+          if (depositAmount > 0) {
+            await prisma.payment.create({
+              data: { orderId: data.id, amount: depositAmount, paymentMethod: 'cash', receiptNumber: `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, reference: 'Initial deposit', paymentDate: new Date(), userId: picked.userId }
+            })
+          }
+          if (frameId) {
+            await prisma.frame.updateMany({ where: { id: frameId, stock: { gt: 0 } }, data: { stock: { decrement: 1 } } })
+          }
+          if (p.localId) {
+            localCache.cacheLocalIdMapping(p.localId, data.id, 'order')
+            localCache.deleteLocalOrder(p.localId)
+            if (localPrescriptionId) localCache.deleteSyncedLocalPrescription(localPrescriptionId)
+            if (localCustomerId) localCache.deleteSyncedLocalCustomer(localCustomerId)
+          }
+          return data
+        },
+        'orders:update': (p) => {
+          const upd: any = pickFields(p.updates, ORDER_FIELDS)
+          // Convert flat relation IDs back to Prisma connect syntax
+          for (const rel of ['vlRightEyeLensType', 'vlLeftEyeLensType', 'vpRightEyeLensType', 'vpLeftEyeLensType', 'frame', 'lensType']) {
+            const idKey = `${rel}Id`
+            if (upd[idKey] !== undefined) {
+              upd[rel] = upd[idKey] ? { connect: { id: upd[idKey] } } : { disconnect: true }
+              delete upd[idKey]
+            }
+          }
+          return prisma.order.update({ where: { id: p.id }, data: upd })
+        },
+        'orders:delete': (p) => prisma.order.delete({ where: { id: p.id } }),
+        'prescriptions:create': async (p) => {
+          if (typeof p.customerId === 'string' && p.customerId.startsWith('local_')) {
+            const mappedCustomerId = localCache.getLocalIdMapping(p.customerId)
+            if (mappedCustomerId) p.customerId = mappedCustomerId
+          }
+          if (typeof p.customerId === 'string' && p.customerId.startsWith('local_')) throw new Error(`Unresolved local customer reference: ${p.customerId}`)
+          const data = await prisma.prescription.create({ data: pickFields(p, PRESCRIPTION_FIELDS) as any })
+          if (p.localId) {
+            localCache.cacheLocalIdMapping(p.localId, data.id, 'prescription')
+            localCache.deleteSyncedLocalPrescription(p.localId)
+          }
+          return data
+        },
+        'prescriptions:update': (p) => prisma.prescription.update({ where: { id: p.id }, data: pickFields(p.updates, PRESCRIPTION_FIELDS) }),
+        'prescriptions:delete': (p) => prisma.prescription.delete({ where: { id: p.id } }),
+        'frames:create': async (p) => {
+          if (currentUser && p.userId !== currentUser.id) {
+            console.warn(`[Sync] Fixing userId in queued frame: ${p.userId} → ${currentUser.id}`)
+            p.userId = currentUser.id
+          }
+          const data = await prisma.frame.create({ data: pickFields(p, FRAME_FIELDS) as any })
+          if (p.localId) localCache.deleteLocalFrame(p.localId)
+          return data
+        },
+        'frames:update': (p) => prisma.frame.update({ where: { id: p.id }, data: pickFields(p.updates, FRAME_FIELDS) }),
+        'frames:delete': (p) => prisma.frame.delete({ where: { id: p.id } }),
+        'lensTypes:create': async (p) => {
+          if (currentUser && p.userId !== currentUser.id) {
+            console.warn(`[Sync] Fixing userId in queued lensType: ${p.userId} → ${currentUser.id}`)
+            p.userId = currentUser.id
+          }
+          const data = await prisma.lensType.create({ data: pickFields(p, LENS_TYPE_FIELDS) as any })
+          if (p.localId) localCache.deleteLocalLensType(p.localId)
+          return data
+        },
+        'lensTypes:update': (p) => prisma.lensType.update({ where: { id: p.id }, data: pickFields(p.updates, LENS_TYPE_FIELDS) }),
+        'lensTypes:delete': (p) => prisma.lensType.delete({ where: { id: p.id } }),
+        'contactLenses:create': (p) => prisma.contactLens.create({ data: pickFields(p, CONTACT_LENS_FIELDS) as any }),
+        'contactLenses:update': (p) => prisma.contactLens.update({ where: { id: p.id }, data: pickFields(p.updates, CONTACT_LENS_FIELDS) }),
+        'contactLenses:delete': (p) => prisma.contactLens.delete({ where: { id: p.id } }),
+        'payments:create': async (p) => {
+          if (currentUser && p.userId !== currentUser.id) {
+            console.warn(`[Sync] Fixing userId in queued payment: ${p.userId} → ${currentUser.id}`)
+            p.userId = currentUser.id
+          }
+          const picked: any = pickFields(p, PAYMENT_FIELDS)
+          picked.receiptNumber = `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+          if (typeof picked.orderId === 'string' && picked.orderId.startsWith('local_')) {
+            const mappedOrderId = localCache.getLocalIdMapping(picked.orderId)
+            if (mappedOrderId) picked.orderId = mappedOrderId
+          }
+          if (typeof picked.orderId === 'string' && picked.orderId.startsWith('local_')) throw new Error(`Unresolved local order reference: ${picked.orderId}`)
+          const data = await prisma.payment.create({ data: picked })
+          if (picked.orderId) {
+            const order = await prisma.order.findUnique({ where: { id: picked.orderId }, select: { balanceDue: true, depositAmount: true } })
+            if (order) {
+              await prisma.order.update({ where: { id: picked.orderId }, data: { balanceDue: Math.max(0, (order.balanceDue || 0) - picked.amount), depositAmount: (order.depositAmount || 0) + picked.amount } })
+            }
+          }
+          if (p.localId) localCache.deleteLocalPayment(p.localId)
+          return data
+        },
+        'payments:delete': (p) => prisma.payment.delete({ where: { id: p.id } }),
+        'expenses:create': async (p) => {
+          if (currentUser && p.userId !== currentUser.id) {
+            console.warn(`[Sync] Fixing userId in queued expense: ${p.userId} → ${currentUser.id}`)
+            p.userId = currentUser.id
+          }
+          const data = await prisma.expense.create({ data: pickFields(p, EXPENSE_FIELDS) as any })
+          if (p.localId) localCache.deleteLocalExpense(p.localId)
+          return data
+        },
+        'expenses:update': (p) => prisma.expense.update({ where: { id: p.id }, data: pickFields(p.updates, EXPENSE_FIELDS) }),
+        'expenses:delete': (p) => prisma.expense.delete({ where: { id: p.id } }),
+        'settings:update': (p) => prisma.setting.update({ where: { userId: p.userId }, data: p.updates }),
+      }
+      syncManager.processQueue(handlers, localCache.getAllLocalIdMappings(), currentUser?.id).then((count) => {
+        if (count > 0) {
+          console.log(`[Sync] Processed ${count} queued items — re-hydrating local cache`)
+          if (currentUser) {
+            localCache.hydrateCache(prisma, currentUser.id).then(() => {
+              console.log('[Sync] Local cache re-hydrated after sync')
+              mainWindow?.webContents.send('sync:status', {
+                pendingItems: currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength(),
+                isOnline: true,
+              })
+            }).catch((err: any) => console.warn('[Sync] Re-hydrate after sync failed:', err?.message || err))
+          } else {
+            mainWindow?.webContents.send('sync:status', {
+              pendingItems: syncManager.getQueueLength(),
+              isOnline: true,
+            })
+          }
+        }
+      }).catch((err: any) => {
+        console.warn('[Sync] Queue processing failed:', err?.message || err)
+      }).finally(() => { syncInProgress = false })
+    }
+  }
+  setInterval(processSyncQueue, 5000)
 
   // ── Mobile Scanner Bridge ──────────────────────────────────────────────────
   // Lightweight WebSocket server (Node `ws`) bound to the LAN so an Expo
@@ -482,8 +784,84 @@ function saveSession(user: { id: string; email: string; name: string; role: stri
 }
 
 let currentUser = loadSession()
+let lastHydrateAt = 0
+let hydrateInProgress = false
+let dbReachable = true
+let lastDbFailAt = 0
 
-// ─── IPC Handlers (Prisma) ───────────────────────────────────────────────────
+function isDbAvailable(): boolean {
+  if (!syncManager.isOnline()) return false
+  if (!dbReachable && Date.now() - lastDbFailAt < 15_000) return false
+  return true
+}
+
+function markDbUnreachable() {
+  const wasReachable = dbReachable
+  dbReachable = false
+  lastDbFailAt = Date.now()
+  if (wasReachable) {
+    mainWindow?.webContents.send('connectivity:status', false)
+  }
+}
+
+function markDbReachable() {
+  dbReachable = true
+}
+
+async function hydrateCurrentUserCache(reason: string, force = false): Promise<boolean> {
+  if (!currentUser) return false
+  if (!syncManager.isOnline()) return false
+  const now = Date.now()
+  if (!force && (hydrateInProgress || now - lastHydrateAt < 30_000)) return false
+  hydrateInProgress = true
+  try {
+    console.log(`[LocalCache] Hydrating cache (${reason}) for user ${currentUser.id}`)
+    await localCache.hydrateCache(prisma, currentUser.id)
+    lastHydrateAt = Date.now()
+    mainWindow?.webContents.send('sync:status', {
+      pendingItems: currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength(),
+      isOnline: true,
+    })
+    return true
+  } catch (err: any) {
+    console.warn(`[LocalCache] Hydrate failed (${reason}):`, err?.message || err)
+    return false
+  } finally {
+    hydrateInProgress = false
+  }
+}
+
+async function repairSessionUserId(): Promise<boolean> {
+  if (!currentUser?.email || !syncManager.isOnline()) return false
+  try {
+    console.log(`[Session] Checking server for user: email="${currentUser.email}", id="${currentUser.id}"`)
+    let serverUser = await prisma.user.findUnique({ where: { email: currentUser.email } })
+    if (!serverUser) {
+      console.warn(`[Session] User not found by email "${currentUser.email}". Trying by id...`)
+      serverUser = await prisma.user.findUnique({ where: { id: currentUser.id } })
+    }
+    if (!serverUser) {
+      console.warn(`[Session] User not found on server (email: ${currentUser.email}, id: ${currentUser.id}). Forcing logout.`)
+      console.warn(`[Session] Please log in with valid Supabase credentials at the login screen.`)
+      currentUser = null
+      saveSession(null)
+      mainWindow?.webContents.send('auth:logged-out')
+      return false
+    }
+    if (serverUser.id !== currentUser.id || serverUser.email !== currentUser.email) {
+      console.warn(`[Session] Repairing session: id ${currentUser.id}→${serverUser.id}, email ${currentUser.email}→${serverUser.email}`)
+      currentUser = { id: serverUser.id, email: serverUser.email, name: serverUser.name, role: serverUser.role }
+      saveSession(currentUser)
+      localCache.cacheUser(serverUser)
+      return true
+    }
+    return false
+  } catch (err: any) {
+    console.warn(`[Session] repairSessionUserId failed:`, err?.message || err)
+    if (isNetworkError(err)) markDbUnreachable()
+    return false
+  }
+}
 
 /**
  * Whitelist: picks only the allowed fields from an input object.
@@ -505,21 +883,135 @@ const FRAME_FIELDS = ['brand', 'model', 'color', 'size', 'cost', 'sellingPrice',
 const LENS_TYPE_FIELDS = ['name', 'category', 'material', 'index', 'baseCost', 'sellingPrice', 'stock', 'reorderThreshold', 'supplierName', 'supplierContact', 'userId'] as const
 const CONTACT_LENS_FIELDS = ['brand', 'model', 'price', 'userId'] as const
 const CUSTOMER_FIELDS = ['firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'address', 'insuranceProvider', 'insurancePolicyNumber', 'insuranceCoverageDetails', 'notes', 'userId'] as const
+const PRESCRIPTION_FIELDS = ['customerId', 'examinationDate', 'doctorName', 'doctorLicense', 'pupillaryDistance', 'readingDistance', 'expirationDate', 'notes', 'hasVLData', 'hasVPData', 'vlLeftEyeAxis', 'vlLeftEyeCylinder', 'vlLeftEyePrism', 'vlLeftEyeSphere', 'vlRightEyeAxis', 'vlRightEyeCylinder', 'vlRightEyePrism', 'vlRightEyeSphere', 'vpLeftEyeAxis', 'vpLeftEyeCylinder', 'vpLeftEyePrism', 'vpLeftEyeSphere', 'vpRightEyeAxis', 'vpRightEyeCylinder', 'vpRightEyePrism', 'vpRightEyeSphere', 'vpLeftEyeAdd', 'vpRightEyeAdd'] as const
+const ORDER_FIELDS = ['orderNumber', 'customerId', 'prescriptionId', 'frameId', 'lensTypeId', 'vlRightEyeLensTypeId', 'vlLeftEyeLensTypeId', 'vpRightEyeLensTypeId', 'vpLeftEyeLensTypeId', 'framePrice', 'vlRightEyeLensPrice', 'vlLeftEyeLensPrice', 'vpRightEyeLensPrice', 'vpLeftEyeLensPrice', 'basePrice', 'addonsPrice', 'totalPrice', 'depositAmount', 'balanceDue', 'status', 'expectedCompletionDate', 'actualCompletionDate', 'customerNotes', 'technicalNotes', 'userId', 'vlLeftEyeLensQuantity', 'vlRightEyeLensQuantity', 'vpLeftEyeLensQuantity', 'vpRightEyeLensQuantity'] as const
+const PAYMENT_FIELDS = ['orderId', 'amount', 'paymentMethod', 'paymentDate', 'receiptNumber', 'reference', 'description', 'type', 'userId'] as const
+const EXPENSE_FIELDS = ['description', 'amount', 'category', 'date', 'notes', 'userId'] as const
+
+function isNetworkError(err: any): boolean {
+  const msg = String(err?.message || '')
+  return (
+    msg.includes("Can't reach database server") ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('ETIMEDOUT') ||
+    msg.includes('ENOTFOUND') ||
+    msg.includes('fetch failed') ||
+    err?.code === 'P1001' ||
+    err?.code === 'P1002' ||
+    err?.code === 'P1017' ||
+    err?._offlineFastPath === true
+  )
+}
+
+function requireDb() {
+  if (!isDbAvailable()) {
+    const err: any = new Error('DB unavailable (fast offline path)')
+    err.code = 'P1001'
+    err._offlineFastPath = true
+    throw err
+  }
+}
+
+function queueUnsyncedLocalRecords(userId: string) {
+  const d = localCache.getDb()
+  let total = 0
+
+  const queueRows = (action: string, rows: any[], normalize: (row: any) => any = row => row) => {
+    for (const row of rows) {
+      // Skip records that were already synced (mapping exists)
+      if (localCache.getLocalIdMapping(row.id)) continue
+      const payload = normalize(row)
+      syncManager.addToQueue(action, { ...payload, localId: row.id }, row.id, currentUser?.id)
+      total++
+    }
+  }
+
+  try {
+    queueRows('customers:create', d.prepare(`SELECT * FROM customers WHERE id LIKE 'local_%' AND userId=?`).all(userId) as any[])
+  } catch { /* table might not exist */ }
+
+  try {
+    queueRows('prescriptions:create', d.prepare(`
+      SELECT prescriptions.* FROM prescriptions
+      LEFT JOIN customers ON customers.id = prescriptions.customerId
+      WHERE prescriptions.id LIKE 'local_%'
+        AND (customers.userId=? OR prescriptions.customerId LIKE 'local_%')
+    `).all(userId) as any[], row => ({
+      ...row,
+      hasVLData: Boolean(row.hasVLData),
+      hasVPData: Boolean(row.hasVPData),
+    }))
+  } catch { /* table might not exist */ }
+
+  try {
+    queueRows('orders:create', d.prepare(`SELECT * FROM orders WHERE id LIKE 'local_%' AND userId=?`).all(userId) as any[])
+  } catch { /* table might not exist */ }
+
+  try {
+    queueRows('frames:create', d.prepare(`SELECT * FROM frames WHERE id LIKE 'local_%' AND userId=?`).all(userId) as any[])
+  } catch { /* table might not exist */ }
+
+  try {
+    queueRows('lensTypes:create', d.prepare(`SELECT * FROM lensTypes WHERE id LIKE 'local_%' AND userId=?`).all(userId) as any[])
+  } catch { /* table might not exist */ }
+
+  try {
+    const payments = d.prepare(`
+      SELECT payments.* FROM payments
+      WHERE payments.id LIKE 'local_%'
+        AND payments.userId=?
+        AND payments.reference != 'Initial deposit'
+    `).all(userId) as any[]
+    queueRows('payments:create', payments, (row) => {
+      if (typeof row.orderId === 'string' && row.orderId.startsWith('local_')) {
+        const mapped = localCache.getLocalIdMapping(row.orderId)
+        if (mapped) row.orderId = mapped
+      }
+      return row
+    })
+  } catch { /* table might not exist */ }
+
+  try {
+    queueRows('expenses:create', d.prepare(`SELECT * FROM expenses WHERE id LIKE 'local_%' AND userId=?`).all(userId) as any[])
+  } catch { /* table might not exist */ }
+
+  if (total > 0) console.log(`[Sync] Re-queued ${total} unsynced local_ records after fresh login`)
+}
 
 function registerIpcHandlers() {
   // ── Auth ──────────────────────────────────────────────────────────────────
   ipcMain.handle('auth:login', async (_e, email: string, password: string) => {
     try {
+      requireDb()
       const user = await prisma.user.findUnique({ where: { email } })
-      if (!user) return { error: 'Invalid email or password' }
-
-      const passwordMatch = await bcrypt.compare(password, user.password)
-      if (!passwordMatch) return { error: 'Invalid email or password' }
-
-      currentUser = { id: user.id, email: user.email, name: user.name, role: user.role }
-      saveSession(currentUser)
-      return { data: { user: currentUser } }
+      markDbReachable()
+      if (user) {
+        const passwordMatch = await bcrypt.compare(password, user.password)
+        if (passwordMatch) {
+          localCache.cacheUser(user)
+          currentUser = { id: user.id, email: user.email, name: user.name, role: user.role }
+          saveSession(currentUser)
+          await repairSessionUserId()
+          await hydrateCurrentUserCache('online-login', true)
+          queueUnsyncedLocalRecords(currentUser.id)
+          return { data: { user: currentUser } }
+        }
+      }
+      return { error: 'Invalid email or password' }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        const localUser = localCache.getLocalUser(email)
+        if (localUser) {
+          const passwordMatch = await bcrypt.compare(password, localUser.password)
+          if (passwordMatch) {
+            currentUser = { id: localUser.id, email: localUser.email, name: localUser.name, role: localUser.role }
+            saveSession(currentUser)
+            return { data: { user: currentUser, offline: true } }
+          }
+        }
+        return { error: 'Unable to connect. Please check your internet and try again, or ensure you have logged in at least once before.' }
+      }
       return { error: err.message || 'Login failed' }
     }
   })
@@ -532,12 +1024,15 @@ function registerIpcHandlers() {
 
   ipcMain.handle('auth:session', async () => {
     if (!currentUser) return { data: null }
+    try { await repairSessionUserId() } catch {}
+    hydrateCurrentUserCache('auth-session', false).catch(() => {})
     return { data: { user: currentUser } }
   })
 
   // ── Customers ─────────────────────────────────────────────────────────────
   ipcMain.handle('customers:list', async (_e, params: { userId: string; query?: string; limit?: number }) => {
     try {
+      requireDb()
       const where: any = { userId: params.userId }
       if (params.query?.trim()) {
         const s = params.query.trim()
@@ -550,57 +1045,102 @@ function registerIpcHandlers() {
       }
       const data = await prisma.customer.findMany({
         where,
-        select: { id: true, firstName: true, lastName: true, email: true, phone: true, createdAt: true, updatedAt: true },
+        select: { id: true, firstName: true, lastName: true, email: true, phone: true, createdAt: true, updatedAt: true, userId: true },
         orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
         ...(params.limit ? { take: params.limit } : {}),
       })
+      markDbReachable()
+      try { for (const c of data) localCache.cacheCustomer(c) } catch {}
       return { data }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        const data = localCache.getLocalCustomers(params.userId, params.query, params.limit || 5000)
+        return { data }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('customers:get', async (_e, id: string) => {
     try {
+      requireDb()
       const data = await prisma.customer.findUnique({ where: { id } })
+      markDbReachable()
+      if (data) localCache.cacheCustomer(data)
       return { data }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        return { data: localCache.getLocalCustomer(id) }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('customers:create', async (_e, customer: any) => {
     try {
+      requireDb()
       const data = await prisma.customer.create({ data: pickFields(customer, CUSTOMER_FIELDS) as any })
+      markDbReachable()
+      localCache.cacheCustomer(data)
       return { data }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        const sanitized = { ...pickFields(customer, CUSTOMER_FIELDS), userId: customer.userId || currentUser?.id }
+        const data = localCache.createLocalCustomer(sanitized)
+        syncManager.addToQueue('customers:create', { ...sanitized, localId: data.id }, data.id, currentUser?.id)
+        return { data }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('customers:update', async (_e, id: string, updates: any) => {
     try {
-      // Whitelist + sanitize optional fields — convert empty strings to null
+      requireDb()
       const clean: any = pickFields(updates, CUSTOMER_FIELDS)
       for (const key of ['email', 'phone', 'address', 'notes', 'insuranceProvider', 'insurancePolicyNumber', 'insuranceCoverageDetails']) {
         if (clean[key] === '') clean[key] = null
       }
-      // Convert dateOfBirth string to Date or null
       if (clean.dateOfBirth === '' || clean.dateOfBirth === undefined) {
         delete clean.dateOfBirth
       } else if (typeof clean.dateOfBirth === 'string') {
         clean.dateOfBirth = new Date(clean.dateOfBirth)
       }
       const data = await prisma.customer.update({ where: { id }, data: clean })
+      markDbReachable()
+      localCache.cacheCustomer(data)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        // Apply update to local cache
+        const existing = localCache.getLocalCustomer(id)
+        if (existing) {
+          const merged = { ...existing, ...updates, updatedAt: new Date().toISOString() }
+          localCache.cacheCustomer(merged)
+        }
+        syncManager.addToQueue('customers:update', { id, updates }, id, currentUser?.id)
+        return { data: localCache.getLocalCustomer(id) }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('customers:delete', async (_e, id: string) => {
     try {
       await prisma.customer.delete({ where: { id } })
+      localCache.deleteLocalCustomer(id)
       return { success: true }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        localCache.deleteLocalCustomer(id)
+        if (id.startsWith('local_')) syncManager.removeFromQueue(id)
+        else syncManager.addToQueue('customers:delete', { id }, id, currentUser?.id)
+        return { success: true }
+      }
       return { error: err.message }
     }
   })
@@ -608,6 +1148,10 @@ function registerIpcHandlers() {
   // ── Orders ────────────────────────────────────────────────────────────────
   ipcMain.handle('orders:list', async (_e, params: any) => {
     try {
+      if (!isDbAvailable()) {
+        const { orders, total } = localCache.getLocalOrders(params.userId, params)
+        return { data: { orders, pagination: { total, pages: Math.ceil(total / (params.limit || 10)), page: params.page || 1, limit: params.limit || 10 } } }
+      }
       const { userId, page = 1, limit = 10, status, search, paymentStatus, startDate, endDate, hasBalance } = params
       const where: any = { userId }
 
@@ -659,8 +1203,21 @@ function registerIpcHandlers() {
         }),
       ])
 
+      // Cache returned data so offline copy stays fresh
+      try {
+        for (const o of orders) {
+          localCache.cacheOrder(o)
+          if (o.customer) localCache.cacheCustomer(o.customer)
+        }
+      } catch {}
+      markDbReachable()
       return { data: { orders, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        markDbUnreachable()
+        const { orders, total } = localCache.getLocalOrders(params.userId, params)
+        return { data: { orders, pagination: { total, pages: Math.ceil(total / (params.limit || 10)), page: params.page || 1, limit: params.limit || 10 } } }
+      }
       return { error: err.message }
     }
   })
@@ -679,19 +1236,37 @@ function registerIpcHandlers() {
 
   ipcMain.handle('orders:get', async (_e, id: string) => {
     try {
+      requireDb()
       const data = await prisma.order.findUnique({
         where: { id },
         include: { customer: true, prescription: true, frame: true, lensType: true, payments: true, vlRightEyeLensType: true, vlLeftEyeLensType: true, vpRightEyeLensType: true, vpLeftEyeLensType: true },
       })
+      markDbReachable()
+      if (data) {
+        localCache.cacheOrder(data)
+        if (data.customer) localCache.cacheCustomer(data.customer)
+        if (data.prescription) localCache.cachePrescription(data.prescription)
+        if (data.frame) localCache.cacheFrame(data.frame)
+        if (data.lensType) localCache.cacheLensType(data.lensType)
+        if (data.payments) data.payments.forEach((p: any) => localCache.cachePayment(p))
+        if (data.vlRightEyeLensType) localCache.cacheLensType(data.vlRightEyeLensType)
+        if (data.vlLeftEyeLensType) localCache.cacheLensType(data.vlLeftEyeLensType)
+        if (data.vpRightEyeLensType) localCache.cacheLensType(data.vpRightEyeLensType)
+        if (data.vpLeftEyeLensType) localCache.cacheLensType(data.vpLeftEyeLensType)
+      }
       return { data }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        return { data: localCache.getLocalOrder(id) }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('orders:create', async (_e, orderData: any) => {
     try {
-      // Always compute order number server-side to avoid race conditions / duplicates
+      requireDb()
       const allOrders = await prisma.order.findMany({
         where: { userId: orderData.userId },
         select: { orderNumber: true },
@@ -706,10 +1281,8 @@ function registerIpcHandlers() {
       }
       orderData.orderNumber = `ORD-${String(maxNum + 1).padStart(3, '0')}`
 
-      // Extract relation connect fields
       const { depositAmount, frameId, ...rest } = orderData
       const createData: any = { ...rest, depositAmount }
-      // Remove relation keys that Prisma doesn't accept as plain strings in create
       delete createData.customer
       delete createData.prescription
       delete createData.frame
@@ -720,14 +1293,13 @@ function registerIpcHandlers() {
         include: { customer: true, prescription: true, frame: true, lensType: true, vlRightEyeLensType: true, vlLeftEyeLensType: true, vpRightEyeLensType: true, vpLeftEyeLensType: true },
       })
 
-      // Create initial deposit payment
       if (depositAmount && depositAmount > 0) {
         await prisma.payment.create({
           data: {
             orderId: data.id,
             amount: depositAmount,
             paymentMethod: 'cash',
-            receiptNumber: `REC-${Date.now().toString().slice(-6)}`,
+            receiptNumber: `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             reference: 'Initial deposit',
             paymentDate: new Date(),
             userId: orderData.userId,
@@ -735,7 +1307,6 @@ function registerIpcHandlers() {
         })
       }
 
-      // Decrement frame stock
       if (frameId) {
         await prisma.frame.updateMany({
           where: { id: frameId, stock: { gt: 0 } },
@@ -743,30 +1314,94 @@ function registerIpcHandlers() {
         })
       }
 
+      // Cache for offline
+      markDbReachable()
+      localCache.cacheOrder(data)
       return { data }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        orderData.userId = orderData.userId || currentUser?.id
+        const data = localCache.createLocalOrder(orderData, orderData.userId)
+        syncManager.addToQueue('orders:create', { ...orderData, localId: data.id }, data.id, currentUser?.id)
+        return { data }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('orders:update', async (_e, id: string, updates: any) => {
     try {
+      requireDb()
       const data = await prisma.order.update({ where: { id }, data: updates })
+      markDbReachable()
+      localCache.cacheOrder(data)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        const existing = localCache.getLocalOrder(id)
+        if (existing) {
+          // Translate Prisma relation syntax { connect: { id } } to flat ID fields
+          const flat: any = { ...updates }
+          for (const rel of ['vlRightEyeLensType', 'vlLeftEyeLensType', 'vpRightEyeLensType', 'vpLeftEyeLensType', 'frame', 'lensType']) {
+            if (flat[rel]?.connect?.id) {
+              flat[`${rel}Id`] = flat[rel].connect.id
+              delete flat[rel]
+            }
+          }
+          const merged = { ...existing, ...flat, updatedAt: new Date().toISOString() }
+          localCache.cacheOrder(merged)
+        }
+        // Store flat updates for sync (strip Prisma relation syntax)
+        const flatUpdates: any = { ...updates }
+        for (const rel of ['vlRightEyeLensType', 'vlLeftEyeLensType', 'vpRightEyeLensType', 'vpLeftEyeLensType', 'frame', 'lensType']) {
+          if (flatUpdates[rel]?.connect?.id) {
+            flatUpdates[`${rel}Id`] = flatUpdates[rel].connect.id
+            delete flatUpdates[rel]
+          }
+        }
+        if (id.startsWith('local_') && syncManager.updateCreatePayload(id, flatUpdates)) {
+          console.log(`[Offline] Merged order edits into pending create for ${id}`)
+        } else {
+          syncManager.addToQueue('orders:update', { id, updates: flatUpdates }, id, currentUser?.id)
+        }
+        return { data: localCache.getLocalOrder(id) }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('orders:delete', async (_e, id: string) => {
     try {
+      requireDb()
       await prisma.order.delete({ where: { id } })
+      markDbReachable()
+      localCache.deleteLocalOrder(id)
       return { success: true }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        localCache.deleteLocalOrder(id)
+        if (id.startsWith('local_')) syncManager.removeFromQueue(id)
+        else syncManager.addToQueue('orders:delete', { id }, id, currentUser?.id)
+        return { success: true }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('orders:latestNumber', async (_e, userId: string) => {
     try {
+      if (!isDbAvailable()) {
+        const { orders } = localCache.getLocalOrders(userId, { limit: 999999 })
+        let maxNum = 0
+        for (const o of orders) {
+          const match = o.orderNumber?.match(/ORD-(\d+)/)
+          if (match) { const num = parseInt(match[1], 10); if (num > maxNum) maxNum = num }
+        }
+        return { data: maxNum > 0 ? `ORD-${String(maxNum).padStart(3, '0')}` : null }
+      }
       const orders = await prisma.order.findMany({
         where: { userId },
         select: { orderNumber: true },
@@ -782,6 +1417,20 @@ function registerIpcHandlers() {
       }
       return { data: maxNum > 0 ? `ORD-${String(maxNum).padStart(3, '0')}` : null }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        // Fall back to local orders
+        const { orders } = localCache.getLocalOrders(userId, { limit: 99999 })
+        if (orders.length === 0) return { data: null }
+        let maxNum = 0
+        for (const o of orders) {
+          const match = o.orderNumber?.match(/ORD-(\d+)/)
+          if (match) {
+            const num = parseInt(match[1], 10)
+            if (num > maxNum) maxNum = num
+          }
+        }
+        return { data: maxNum > 0 ? `ORD-${String(maxNum).padStart(3, '0')}` : null }
+      }
       return { error: err.message }
     }
   })
@@ -789,6 +1438,7 @@ function registerIpcHandlers() {
   // ── Prescriptions ─────────────────────────────────────────────────────────
   ipcMain.handle('prescriptions:list', async (_e, params: any) => {
     try {
+      requireDb()
       const { userId, customerId, search, page = 1, limit = 10 } = params
       const where: any = {}
       if (customerId) where.customerId = customerId
@@ -803,7 +1453,6 @@ function registerIpcHandlers() {
             { customer: { lastName: { contains: s, mode: 'insensitive' } } },
           ]
         }
-        // Combine with existing where using AND
         const existing = { ...where }
         Object.keys(where).forEach(k => delete where[k])
         where.AND = [existing, searchFilter]
@@ -821,8 +1470,16 @@ function registerIpcHandlers() {
         }),
       ])
 
+      markDbReachable()
       return { data: { prescriptions, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        const prescriptions = params.customerId
+          ? localCache.getLocalPrescriptions(params.customerId)
+          : []
+        return { data: { prescriptions, pagination: { total: prescriptions.length, pages: 1, page: 1, limit: prescriptions.length } } }
+      }
       return { error: err.message }
     }
   })
@@ -834,31 +1491,67 @@ function registerIpcHandlers() {
         include: { customer: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } }, orders: { select: { id: true, orderNumber: true, createdAt: true, status: true } } },
       })
       if (!data) return { error: 'Prescription not found' }
+      localCache.cachePrescription(data)
+      if (data.customer) localCache.cacheCustomer(data.customer)
       return { data }
     } catch (err: any) { return { error: err.message } }
   })
 
   ipcMain.handle('prescriptions:create', async (_e, prescription: any) => {
     try {
+      requireDb()
       const data = await prisma.prescription.create({ data: prescription })
+      markDbReachable()
+      localCache.cachePrescription(data)
       return { data }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        const data = localCache.createLocalPrescription(prescription)
+        syncManager.addToQueue('prescriptions:create', { ...prescription, localId: data.id }, data.id, currentUser?.id)
+        return { data: data }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('prescriptions:update', async (_e, id: string, updates: any) => {
     try {
+      requireDb()
       const data = await prisma.prescription.update({ where: { id }, data: updates })
+      localCache.cachePrescription(data)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (id.startsWith('local_') && syncManager.updateCreatePayload(id, updates)) {
+          console.log(`[Offline] Merged prescription edits into pending create for ${id}`)
+        } else {
+          syncManager.addToQueue('prescriptions:update', { id, updates }, id, currentUser?.id)
+        }
+        const existing = localCache.getLocalPrescription(id)
+        if (existing) {
+          const merged = { ...existing, ...updates, updatedAt: new Date().toISOString() }
+          localCache.cachePrescription(merged)
+        }
+        return { data: existing ? { ...existing, ...updates } : updates }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('prescriptions:delete', async (_e, id: string) => {
     try {
+      requireDb()
       await prisma.prescription.delete({ where: { id } })
+      localCache.deleteLocalPrescription(id)
       return { success: true }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        localCache.deleteLocalPrescription(id)
+        if (id.startsWith('local_')) syncManager.removeFromQueue(id)
+        else syncManager.addToQueue('prescriptions:delete', { id }, id, currentUser?.id)
+        return { success: true }
+      }
       return { error: err.message }
     }
   })
@@ -866,6 +1559,7 @@ function registerIpcHandlers() {
   // ── Frames ────────────────────────────────────────────────────────────────
   ipcMain.handle('frames:list', async (_e, params: { userId: string; query?: string }) => {
     try {
+      requireDb()
       const where: any = { userId: params.userId }
       if (params.query) {
         where.OR = [
@@ -876,36 +1570,69 @@ function registerIpcHandlers() {
         ]
       }
       const data = await prisma.frame.findMany({ where, orderBy: [{ stock: 'desc' }, { brand: 'asc' }] })
+      try { for (const f of data) localCache.cacheFrame(f) } catch {}
       return { data }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        return { data: localCache.getLocalFrames(params.userId) }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('frames:create', async (_e, frame: any) => {
     try {
+      requireDb()
       const data = await prisma.frame.create({ data: pickFields(frame, FRAME_FIELDS) as any })
+      localCache.cacheFrame(data)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        const row = { ...pickFields(frame, FRAME_FIELDS), userId: frame.userId || currentUser?.id, id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+        localCache.cacheFrame(row)
+        syncManager.addToQueue('frames:create', { ...row, localId: row.id }, row.id, currentUser?.id)
+        return { data: row }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('frames:update', async (_e, id: string, updates: any) => {
     try {
+      requireDb()
       const data = await prisma.frame.update({ where: { id }, data: pickFields(updates, FRAME_FIELDS) })
+      localCache.cacheFrame(data)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        syncManager.addToQueue('frames:update', { id, updates }, id, currentUser?.id)
+        return { data: updates }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('frames:delete', async (_e, id: string) => {
     try {
+      requireDb()
       await prisma.frame.delete({ where: { id } })
+      localCache.deleteLocalFrame(id)
       return { success: true }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        localCache.deleteLocalFrame(id)
+        if (id.startsWith('local_')) syncManager.removeFromQueue(id)
+        else syncManager.addToQueue('frames:delete', { id }, id, currentUser?.id)
+        return { success: true }
+      }
+      return { error: err.message }
+    }
   })
 
   // ── Lens Types ────────────────────────────────────────────────────────────
   ipcMain.handle('lensTypes:list', async (_e, params: { userId: string; search?: string }) => {
     try {
+      requireDb()
       const where: any = { userId: params.userId }
       if (params.search) {
         where.OR = [
@@ -915,36 +1642,69 @@ function registerIpcHandlers() {
         ]
       }
       const data = await prisma.lensType.findMany({ where, orderBy: { name: 'asc' } })
+      try { for (const lt of data) localCache.cacheLensType(lt) } catch {}
       return { data }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        return { data: localCache.getLocalLensTypes(params.userId) }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('lensTypes:create', async (_e, lensType: any) => {
     try {
+      requireDb()
       const data = await prisma.lensType.create({ data: pickFields(lensType, LENS_TYPE_FIELDS) as any })
+      localCache.cacheLensType(data)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        const row = { ...pickFields(lensType, LENS_TYPE_FIELDS), userId: lensType.userId || currentUser?.id, id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+        localCache.cacheLensType(row)
+        syncManager.addToQueue('lensTypes:create', { ...row, localId: row.id }, row.id, currentUser?.id)
+        return { data: row }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('lensTypes:update', async (_e, id: string, updates: any) => {
     try {
+      requireDb()
       const data = await prisma.lensType.update({ where: { id }, data: pickFields(updates, LENS_TYPE_FIELDS) })
+      localCache.cacheLensType(data)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        syncManager.addToQueue('lensTypes:update', { id, updates }, id, currentUser?.id)
+        return { data: updates }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('lensTypes:delete', async (_e, id: string) => {
     try {
+      requireDb()
       await prisma.lensType.delete({ where: { id } })
+      localCache.deleteLocalLensType(id)
       return { success: true }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        localCache.deleteLocalLensType(id)
+        if (id.startsWith('local_')) syncManager.removeFromQueue(id)
+        else syncManager.addToQueue('lensTypes:delete', { id }, id, currentUser?.id)
+        return { success: true }
+      }
+      return { error: err.message }
+    }
   })
 
   // ── Contact Lenses ──────────────────────────────────────────────────────
   ipcMain.handle('contactLenses:list', async (_e, params: { userId: string; search?: string }) => {
     try {
+      requireDb()
       const where: any = { userId: params.userId }
       if (params.search) {
         where.OR = [
@@ -954,29 +1714,44 @@ function registerIpcHandlers() {
       }
       const data = await prisma.contactLens.findMany({ where, orderBy: { brand: 'asc' } })
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isNetworkError(err)) { return { data: [] } }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('contactLenses:create', async (_e, contactLens: any) => {
     try { return { data: await prisma.contactLens.create({ data: pickFields(contactLens, CONTACT_LENS_FIELDS) as any }) } }
-    catch (err: any) { return { error: err.message } }
+    catch (err: any) {
+      if (isNetworkError(err)) {
+        syncManager.addToQueue('contactLenses:create', contactLens, `local_${Date.now()}`, currentUser?.id)
+        return { data: { ...contactLens, id: `local_${Date.now()}`, createdAt: new Date().toISOString() } }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('contactLenses:update', async (_e, id: string, updates: any) => {
     try { return { data: await prisma.contactLens.update({ where: { id }, data: pickFields(updates, CONTACT_LENS_FIELDS) }) } }
-    catch (err: any) { return { error: err.message } }
+    catch (err: any) {
+      if (isNetworkError(err)) { syncManager.addToQueue('contactLenses:update', { id, updates }, id, currentUser?.id); return { data: updates } }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('contactLenses:delete', async (_e, id: string) => {
     try { await prisma.contactLens.delete({ where: { id } }); return { success: true } }
-    catch (err: any) { return { error: err.message } }
+    catch (err: any) {
+      if (isNetworkError(err)) { if (id.startsWith('local_')) syncManager.removeFromQueue(id); else syncManager.addToQueue('contactLenses:delete', { id }, id, currentUser?.id); return { success: true } }
+      return { error: err.message }
+    }
   })
 
   // ── Payments ──────────────────────────────────────────────────────────────
   ipcMain.handle('payments:list', async (_e, params: any) => {
     try {
+      requireDb()
       const { userId, orderId, search, startDate, endDate, paymentMethod, page = 1, limit = 15 } = params
-      // Match payments belonging to the user directly OR via their orders
       const userFilter = userId ? { OR: [{ userId }, { order: { userId } }] } : {}
       const where: any = { ...userFilter }
       if (orderId) where.orderId = orderId
@@ -984,7 +1759,6 @@ function registerIpcHandlers() {
       if (endDate) where.paymentDate = { ...(where.paymentDate || {}), lte: new Date(endDate) }
       if (paymentMethod) where.paymentMethod = { contains: paymentMethod, mode: 'insensitive' }
       if (search) {
-        // Wrap existing conditions in AND to combine with search OR
         const existing = { ...where }
         Object.keys(where).forEach(k => delete where[k])
         where.AND = [
@@ -1010,20 +1784,32 @@ function registerIpcHandlers() {
         prisma.payment.aggregate({ where, _sum: { amount: true } }),
       ])
 
+      markDbReachable()
+      try { for (const p of payments) localCache.cachePayment(p) } catch {}
       return { data: { payments, pagination: { total, pages: Math.ceil(total / limit), page, limit }, totalAmount: agg._sum.amount || 0 } }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        const { payments, total } = localCache.getLocalPayments(params.userId, params)
+        // Sum ALL payments (not just current page) for accurate total
+        const d = localCache.getDb()
+        const agg = (d.prepare('SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE userId=? OR orderId IN (SELECT id FROM orders WHERE userId=?)').get(params.userId, params.userId) as any)
+        const totalAmount = agg?.s || 0
+        return { data: { payments, pagination: { total, pages: Math.ceil(total / (params.limit || 10)), page: params.page || 1, limit: params.limit || 10 }, totalAmount } }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('payments:create', async (_e, payment: any) => {
     try {
+      requireDb()
       if (!payment.receiptNumber) {
-        payment.receiptNumber = `RCT-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 10000)}`
+        payment.receiptNumber = `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       }
       const data = await prisma.payment.create({ data: payment })
+      markDbReachable()
 
-      // Update order balance
       if (payment.orderId) {
         const order = await prisma.order.findUnique({ where: { id: payment.orderId }, select: { balanceDue: true, depositAmount: true } })
         if (order) {
@@ -1037,17 +1823,33 @@ function registerIpcHandlers() {
         }
       }
 
+      localCache.cachePayment(data)
       return { data }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        const safePayment = { ...payment, userId: payment.userId || currentUser?.id }
+        const data = localCache.createLocalPayment(safePayment)
+        syncManager.addToQueue('payments:create', { ...safePayment, localId: data.id }, data.id, currentUser?.id)
+        return { data }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('payments:delete', async (_e, id: string) => {
     try {
+      requireDb()
       await prisma.payment.delete({ where: { id } })
+      localCache.deleteLocalPayment(id)
       return { success: true }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        localCache.deleteLocalPayment(id)
+        if (id.startsWith('local_')) syncManager.removeFromQueue(id)
+        else syncManager.addToQueue('payments:delete', { id }, id, currentUser?.id)
+        return { success: true }
+      }
       return { error: err.message }
     }
   })
@@ -1055,6 +1857,7 @@ function registerIpcHandlers() {
   // ── Expenses ──────────────────────────────────────────────────────────────
   ipcMain.handle('expenses:list', async (_e, params: any) => {
     try {
+      requireDb()
       const { userId, date, category, page = 1, limit = 10 } = params
       const where: any = { userId }
       if (date) {
@@ -1071,35 +1874,64 @@ function registerIpcHandlers() {
         prisma.expense.findMany({ where, orderBy: { date: 'desc' }, skip: offset, take: limit }),
       ])
 
+      try { for (const e of expenses) localCache.cacheExpense(e) } catch {}
       return { data: { expenses, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        const { expenses, total } = localCache.getLocalExpenses(params.userId, params)
+        return { data: { expenses, pagination: { total, pages: Math.ceil(total / (params.limit || 10)), page: params.page || 1, limit: params.limit || 10 } } }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('expenses:create', async (_e, expense: any) => {
     try {
+      requireDb()
       if (expense.date && typeof expense.date === 'string') expense.date = new Date(expense.date)
       const data = await prisma.expense.create({ data: expense })
+      localCache.cacheExpense(data)
       return { data }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        const row = { ...expense, userId: expense.userId || currentUser?.id, id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+        localCache.cacheExpense(row)
+        syncManager.addToQueue('expenses:create', { ...row, localId: row.id }, row.id, currentUser?.id)
+        return { data: row }
+      }
+      return { error: err.message }
     }
-    catch (err: any) { return { error: err.message } }
   })
 
   ipcMain.handle('expenses:update', async (_e, id: string, updates: any) => {
     try {
+      requireDb()
       if (updates.date && typeof updates.date === 'string') updates.date = new Date(updates.date)
       const data = await prisma.expense.update({ where: { id }, data: updates })
+      localCache.cacheExpense(data)
       return { data }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        syncManager.addToQueue('expenses:update', { id, updates }, id, currentUser?.id)
+        return { data: updates }
+      }
+      return { error: err.message }
     }
-    catch (err: any) { return { error: err.message } }
   })
 
   ipcMain.handle('expenses:delete', async (_e, id: string) => {
     try {
+      requireDb()
       await prisma.expense.delete({ where: { id } })
+      localCache.deleteLocalExpense(id)
       return { success: true }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        localCache.deleteLocalExpense(id)
+        if (id.startsWith('local_')) syncManager.removeFromQueue(id)
+        else syncManager.addToQueue('expenses:delete', { id }, id, currentUser?.id)
+        return { success: true }
+      }
       return { error: err.message }
     }
   })
@@ -1107,6 +1939,7 @@ function registerIpcHandlers() {
   // ── Settings ──────────────────────────────────────────────────────────────
   ipcMain.handle('settings:get', async (_e, userId: string) => {
     try {
+      requireDb()
       let data = await prisma.setting.findUnique({ where: { userId } })
       if (!data) {
         data = await prisma.setting.create({
@@ -1121,17 +1954,44 @@ function registerIpcHandlers() {
           },
         })
       }
+      localCache.cacheSetting(data)
       return { data }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        let data = localCache.getLocalSettings(userId)
+        if (!data) {
+          data = {
+            id: `local_settings_${userId}`, userId,
+            opticianName: 'Optical Shop',
+            opticianAddress: '123 Main Street, City, Country',
+            opticianPhone: '+1 234 567 8900',
+            language: 'en', currency: 'DA', timezone: 'Africa/Algiers',
+            createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+          }
+          localCache.cacheSetting(data)
+        }
+        return { data }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('settings:update', async (_e, userId: string, updates: any) => {
     try {
+      requireDb()
       const data = await prisma.setting.update({ where: { userId }, data: updates })
+      localCache.cacheSetting(data)
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        const existing = localCache.getLocalSettings(userId) || {}
+        const merged = { ...existing, ...updates, userId, updatedAt: new Date().toISOString() }
+        localCache.cacheSetting(merged)
+        syncManager.addToQueue('settings:update', { userId, updates }, userId, currentUser?.id)
+        return { data: merged }
+      }
+      return { error: err.message }
+    }
   })
 
   // ── Users (Admin) ─────────────────────────────────────────────────────────
@@ -1142,7 +2002,15 @@ function registerIpcHandlers() {
         orderBy: { createdAt: 'desc' },
       })
       return { data }
-    } catch (err: any) { return { error: err.message } }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        // Return cached users from local SQLite (limited)
+        const d = localCache.getDb()
+        const users = d.prepare('SELECT id, name, email, role, createdAt, updatedAt FROM users ORDER BY createdAt DESC').all()
+        return { data: users }
+      }
+      return { error: err.message }
+    }
   })
 
   ipcMain.handle('users:create', async (_e, userData: any) => {
@@ -1152,6 +2020,7 @@ function registerIpcHandlers() {
         data: { email: userData.email, name: userData.name, password: hashedPassword, role: userData.role || 'ASSISTANT' },
         select: { id: true, name: true, email: true, role: true, createdAt: true, updatedAt: true },
       })
+      localCache.cacheUser({ ...data, password: hashedPassword })
       return { data }
     } catch (err: any) { return { error: err.message } }
   })
@@ -1176,6 +2045,9 @@ function registerIpcHandlers() {
   // ── Dashboard Stats (matches web app's /api/dashboard/stats exactly) ─────
   ipcMain.handle('dashboard:stats', async (_e, params: any) => {
     try {
+      if (!isDbAvailable()) {
+        return { data: localCache.getLocalDashboardStats(params.userId, params.filter) }
+      }
       const { userId, filter = 'all', startDate: startParam, endDate: endParam } = params
       const now = new Date()
 
@@ -1304,6 +2176,8 @@ function registerIpcHandlers() {
         percentage: formattedPayments > 0 ? Math.round(((item._sum.amount || 0) / formattedPayments) * 100) : 0,
       }))
 
+      // Keep local cache fresh after every online dashboard view (debounced)
+      hydrateCurrentUserCache('dashboard-online', false).catch(() => {})
       return {
         data: {
           totalCustomers,
@@ -1329,6 +2203,9 @@ function registerIpcHandlers() {
         },
       }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        return { data: localCache.getLocalDashboardStats(params.userId, params.filter) }
+      }
       return { error: err.message }
     }
   })
@@ -1336,6 +2213,7 @@ function registerIpcHandlers() {
   // ── Dashboard: Revenue Timeline (daily grouped) ─────────────────────────
   ipcMain.handle('dashboard:revenueTimeline', async (_e, params: any) => {
     try {
+      requireDb()
       const { userId, filter = 'month', startDate: startParam, endDate: endParam } = params
       const now = new Date()
 
@@ -1422,6 +2300,10 @@ function registerIpcHandlers() {
 
       return { data: timeline }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        return { data: localCache.getLocalRevenueTimeline(params.userId, params.filter, params.startDate, params.endDate) }
+      }
       return { error: err.message }
     }
   })
@@ -1429,6 +2311,7 @@ function registerIpcHandlers() {
   // ── Dashboard: Recent Activity ───────────────────────────────────────────
   ipcMain.handle('dashboard:recentActivity', async (_e, params: any) => {
     try {
+      requireDb()
       const { userId, limit = 10 } = params
       const [recentOrders, recentCustomers, recentPayments] = await Promise.all([
         prisma.order.findMany({
@@ -1477,6 +2360,10 @@ function registerIpcHandlers() {
 
       return { data: activities.slice(0, limit) }
     } catch (err: any) {
+      if (isNetworkError(err)) {
+        if (!err._offlineFastPath) markDbUnreachable()
+        return { data: localCache.getLocalRecentActivity(params.userId, params.limit) }
+      }
       return { error: err.message }
     }
   })

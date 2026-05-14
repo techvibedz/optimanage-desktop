@@ -1,8 +1,9 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useSettings } from '@/lib/settings-context'
+import { useConnectivityRefresh } from '@/lib/use-connectivity-refresh'
 import { toast } from 'sonner'
 import {
   ArrowLeft, User, CalendarDays, CreditCard, Package, Eye, Clock,
@@ -58,6 +59,7 @@ export default function OrderDetailsPage() {
   }
 
   useEffect(() => { fetchOrder() }, [id])
+  useConnectivityRefresh(useCallback(() => { if (!isEditing) fetchOrder(true) }, [id, isEditing]))
 
   const startEditing = async () => {
     const rx = order?.prescription

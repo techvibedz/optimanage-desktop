@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
   DollarSign, ShoppingCart, Users, RefreshCw, Package, Zap, Eye, EyeOff,
@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from '@/lib/use-translation'
 import { useAuth } from '@/lib/auth-context'
+import { useConnectivityRefresh } from '@/lib/use-connectivity-refresh'
 import RevenueChart from '@/components/RevenueChart'
 
 interface DashboardStats {
@@ -55,6 +56,7 @@ export default function DashboardPage() {
       fetchAll(activeFilter)
     }
   }, [user?.id])
+  useConnectivityRefresh(useCallback(() => { if (user?.id) fetchAll(activeFilter) }, [user?.id, activeFilter]))
 
   const fetchAll = async (filter: string, startDate?: string, endDate?: string) => {
     if (!user?.id) return

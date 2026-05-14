@@ -7,6 +7,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   login: (email: string, password: string) => ipcRenderer.invoke('auth:login', email, password),
   logout: () => ipcRenderer.invoke('auth:logout'),
   getSession: () => ipcRenderer.invoke('auth:session'),
+  onLoggedOut: (callback: () => void) => {
+    const handler = () => callback()
+    ipcRenderer.on('auth:logged-out', handler)
+    return () => { ipcRenderer.removeListener('auth:logged-out', handler) }
+  },
 
   // Customers
   getCustomers: (params: any) => ipcRenderer.invoke('customers:list', params),
@@ -87,6 +92,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: any, online: boolean) => callback(online)
     ipcRenderer.on('connectivity:status', handler)
     return () => { ipcRenderer.removeListener('connectivity:status', handler) }
+  },
+
+  // Sync
+  getSyncStatus: () => ipcRenderer.invoke('sync:status'),
+  hydrateSyncCache: () => ipcRenderer.invoke('sync:hydrate'),
+  onSyncStatus: (callback: (status: { pendingItems: number; isOnline: boolean }) => void) => {
+    const handler = (_event: any, status: { pendingItems: number; isOnline: boolean }) => callback(status)
+    ipcRenderer.on('sync:status', handler)
+    return () => { ipcRenderer.removeListener('sync:status', handler) }
   },
 
   // Mobile Scanner Bridge (Expo companion app)

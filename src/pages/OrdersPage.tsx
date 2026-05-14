@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
+import { useConnectivityRefresh } from '@/lib/use-connectivity-refresh'
 import { toast } from 'sonner'
 import { Plus, Search, ShoppingCart, Eye, Pencil, Trash2 } from 'lucide-react'
 
@@ -28,6 +29,7 @@ export default function OrdersPage() {
   }, [search])
 
   useEffect(() => { fetchOrders() }, [page, debouncedSearch, paymentFilter])
+  useConnectivityRefresh(useCallback(() => { fetchOrders() }, [page, debouncedSearch, paymentFilter]))
 
   const fetchOrders = async () => {
     if (!user?.id) return

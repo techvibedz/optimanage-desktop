@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
+import { useConnectivityRefresh } from '@/lib/use-connectivity-refresh'
 import { toast } from 'sonner'
 import { Plus, Search, Pencil, Trash2, Users } from 'lucide-react'
 
@@ -15,6 +16,7 @@ export default function CustomersPage() {
   const [form, setForm] = useState({ firstName: '', lastName: '', phone: '', email: '', dateOfBirth: '', address: '' })
 
   useEffect(() => { fetchCustomers() }, [search])
+  useConnectivityRefresh(useCallback(() => { fetchCustomers() }, [search]))
 
   const fetchCustomers = async () => {
     if (!user?.id) return

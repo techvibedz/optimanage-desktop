@@ -177,6 +177,13 @@ function initTables() {
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS localIdMappings (
+      localId TEXT PRIMARY KEY,
+      serverId TEXT NOT NULL,
+      model TEXT NOT NULL,
+      createdAt TEXT NOT NULL
+    );
   `)
 
   // ─── Idempotent migrations for existing DBs ──────────────────────────────
@@ -316,7 +323,42 @@ export function getLocalUser(email: string): any {
   return getDb().prepare('SELECT * FROM users WHERE email=?').get(email) || null
 }
 
-// ─── Delete helpers (for cache consistency on online deletes) ────────────────
+export function cacheLocalIdMapping(localId: string, serverId: string, model: string) {
+  getDb().prepare(`INSERT OR REPLACE INTO localIdMappings (localId,serverId,model,createdAt) VALUES (?,?,?,?)`)
+    .run(localId, serverId, model, new Date().toISOString())
+}
+
+export function getLocalIdMapping(localId: string): string | null {
+  const row = getDb().prepare('SELECT serverId FROM localIdMappings WHERE localId=?').get(localId) as any
+  return row?.serverId || null
+}
+
+export function getAllLocalIdMappings(): Record<string, string> {
+  const rows = getDb().prepare('SELECT localId, serverId FROM localIdMappings').all() as any[]
+  const map: Record<string, string> = {}
+  for (const r of rows) map[r.localId] = r.serverId
+  return map
+}
+
+export function deleteLocalIdMapping(localId: string) {
+  getDb().prepare('DELETE FROM localIdMappings WHERE localId=?').run(localId)
+}
+
+export function deleteSyncedLocalCustomer(id: string) {
+  const d = getDb()
+  const dependents = d.prepare(`SELECT COUNT(*) as c FROM orders WHERE customerId=?`).get(id) as any
+  if ((dependents?.c || 0) === 0) {
+    deleteLocalCustomer(id)
+  }
+}
+
+export function deleteSyncedLocalPrescription(id: string) {
+  const d = getDb()
+  const dependents = d.prepare(`SELECT COUNT(*) as c FROM orders WHERE prescriptionId=?`).get(id) as any
+  if ((dependents?.c || 0) === 0) {
+    deleteLocalPrescription(id)
+  }
+}
 
 export function deleteLocalCustomer(id: string) {
   const d = getDb()
@@ -455,6 +497,10 @@ export function getLocalOrder(id: string): any {
   return order
 }
 
+export function getLocalPrescription(id: string): any {
+  return getDb().prepare('SELECT * FROM prescriptions WHERE id=?').get(id) || null
+}
+
 export function getLocalPrescriptions(customerId: string): any[] {
   return getDb().prepare('SELECT * FROM prescriptions WHERE customerId=? ORDER BY createdAt DESC').all(customerId)
 }
@@ -501,11 +547,10 @@ export function getLocalPayments(userId: string, params: any = {}): { payments: 
     if ((p as any).orderId) {
       (p as any).order = d.prepare('SELECT id, orderNumber, customerId FROM orders WHERE id=?').get((p as any).orderId)
       if ((p as any).order?.customerId) {
-        (p as any).order.customer = d.prepare('SELECT id, firstName, lastName FROM customers WHERE id=?').get((p as any).order.customerId)
+          (p as any).order.customer = d.prepare('SELECT id, firstName, lastName FROM customers WHERE id=?').get((p as any).order.customerId)
       }
     }
   }
-
   return { payments, total }
 }
 
@@ -574,16 +619,23 @@ export function createLocalOrder(data: any, userId: string): any {
   const row = { ...data, id, orderNumber, createdAt: now, updatedAt: now }
   cacheOrder(row)
 
-  // Create deposit payment locally if needed
+  // Create deposit payment record locally — but do NOT update the order's
+  // balanceDue/depositAmount since the frontend already computed them correctly.
   if (data.depositAmount && data.depositAmount > 0) {
-    createLocalPayment({
+    const paymentId = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    const receiptNumber = `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    cachePayment({
+      id: paymentId,
       orderId: id,
       amount: data.depositAmount,
       paymentMethod: 'cash',
-      receiptNumber: `REC-${Date.now().toString().slice(-6)}`,
+      receiptNumber,
       reference: 'Initial deposit',
       paymentDate: now,
       userId,
+      createdAt: now,
+      updatedAt: now,
+      type: 'ORDER',
     })
   }
 
@@ -603,7 +655,7 @@ export function createLocalPayment(data: any): any {
   const id = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   const now = new Date().toISOString()
   if (!data.receiptNumber) {
-    data.receiptNumber = `RCT-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 10000)}`
+    data.receiptNumber = `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   }
   const row = { ...data, id, createdAt: now, updatedAt: now }
   cachePayment(row)
@@ -636,49 +688,229 @@ export function createLocalPrescription(data: any): any {
 export function getLocalDashboardStats(userId: string, filter: string = 'all'): any {
   const d = getDb()
   const now = new Date()
-  let dateFilter = ''
-  const args: any[] = [userId]
 
+  // Build payment date range matching online: gte start, lte now
+  let paymentDateFilter = ''
+  const payArgs: any[] = [userId, userId]
   if (filter === 'today') {
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
-    dateFilter = ' AND createdAt >= ?'
-    args.push(start)
+    paymentDateFilter = ' AND paymentDate >= ? AND paymentDate <= ?'
+    payArgs.push(new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString(), now.toISOString())
   } else if (filter === 'week') {
     const start = new Date(now)
     start.setDate(now.getDate() - now.getDay())
     start.setHours(0, 0, 0, 0)
-    dateFilter = ' AND createdAt >= ?'
-    args.push(start.toISOString())
+    paymentDateFilter = ' AND paymentDate >= ? AND paymentDate <= ?'
+    payArgs.push(start.toISOString(), now.toISOString())
   } else if (filter === 'month') {
-    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-    dateFilter = ' AND createdAt >= ?'
-    args.push(start)
+    paymentDateFilter = ' AND paymentDate >= ? AND paymentDate <= ?'
+    payArgs.push(new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), now.toISOString())
+  }
+
+  // Build order date range matching online: gte start, lte now
+  let orderDateFilter = ''
+  const orderArgs: any[] = [userId]
+  if (filter === 'today') {
+    orderDateFilter = ' AND createdAt >= ? AND createdAt <= ?'
+    orderArgs.push(new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString(), now.toISOString())
+  } else if (filter === 'week') {
+    const start = new Date(now)
+    start.setDate(now.getDate() - now.getDay())
+    start.setHours(0, 0, 0, 0)
+    orderDateFilter = ' AND createdAt >= ? AND createdAt <= ?'
+    orderArgs.push(start.toISOString(), now.toISOString())
+  } else if (filter === 'month') {
+    orderDateFilter = ' AND createdAt >= ? AND createdAt <= ?'
+    orderArgs.push(new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), now.toISOString())
+  }
+
+  // Build expense date range matching online: gte start, lte now
+  let expenseDateFilter = ''
+  const expenseArgs: any[] = [userId]
+  if (filter === 'today') {
+    expenseDateFilter = ' AND date >= ? AND date <= ?'
+    expenseArgs.push(new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString(), now.toISOString())
+  } else if (filter === 'week') {
+    const start = new Date(now)
+    start.setDate(now.getDate() - now.getDay())
+    start.setHours(0, 0, 0, 0)
+    expenseDateFilter = ' AND date >= ? AND date <= ?'
+    expenseArgs.push(start.toISOString(), now.toISOString())
+  } else if (filter === 'month') {
+    expenseDateFilter = ' AND date >= ? AND date <= ?'
+    expenseArgs.push(new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), now.toISOString())
   }
 
   const totalCustomers = (d.prepare('SELECT COUNT(*) as c FROM customers WHERE userId=?').get(userId) as any).c
-  const ordersCount = (d.prepare(`SELECT COUNT(*) as c FROM orders WHERE userId=?${dateFilter}`).get(...args) as any).c
-  const totalRevenue = (d.prepare(`SELECT COALESCE(SUM(totalPrice),0) as s FROM orders WHERE userId=?${dateFilter}`).get(...args) as any).s
-  const totalPayments = (d.prepare(`SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE (userId=? OR orderId IN (SELECT id FROM orders WHERE userId=?))${dateFilter ? dateFilter : ''}`).get(userId, userId, ...(dateFilter ? args.slice(1) : [])) as any).s
+  const ordersCount = (d.prepare(`SELECT COUNT(*) as c FROM orders WHERE userId=?${orderDateFilter}`).get(...orderArgs) as any).c
+  const totalPrescriptions = (d.prepare('SELECT COUNT(*) as c FROM prescriptions WHERE customerId IN (SELECT id FROM customers WHERE userId=?)').get(userId) as any).c
+
+  const paymentsQuery = `SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE (userId=? OR orderId IN (SELECT id FROM orders WHERE userId=?))${paymentDateFilter}`
+  const totalPayments = (d.prepare(paymentsQuery).get(...payArgs) as any).s
+
+  const expensesQuery = `SELECT COALESCE(SUM(amount),0) as s FROM expenses WHERE userId=?${expenseDateFilter}`
+  const totalExpenses = (d.prepare(expensesQuery).get(...expenseArgs) as any).s
+
+  const formattedPayments = Math.round(totalPayments)
+  const netRevenue = Math.round(totalPayments - totalExpenses)
+  const totalOrderAmount = (d.prepare(`SELECT COALESCE(SUM(totalPrice),0) as s FROM orders WHERE userId=?${orderDateFilter}`).get(...orderArgs) as any).s
+  const totalDeposits = (d.prepare(`SELECT COALESCE(SUM(depositAmount),0) as s FROM orders WHERE userId=?${orderDateFilter}`).get(...orderArgs) as any).s
+
+  const breakdown = d.prepare(`SELECT paymentMethod, COALESCE(SUM(amount),0) as amount FROM payments WHERE (userId=? OR orderId IN (SELECT id FROM orders WHERE userId=?))${paymentDateFilter} GROUP BY paymentMethod`).all(...payArgs) as any[]
+  const paymentMethodBreakdown = breakdown.map((item: any) => ({
+    method: item.paymentMethod || 'Unknown',
+    amount: Math.round(item.amount),
+    percentage: formattedPayments > 0 ? Math.round((item.amount / formattedPayments) * 100) : 0,
+  }))
 
   return {
     totalCustomers,
     ordersThisMonth: ordersCount,
-    totalRevenue: Math.round(totalRevenue),
-    totalPayments: Math.round(totalPayments),
-    totalPrescriptions: 0,
+    totalPrescriptions,
+    totalRevenue: netRevenue,
+    totalPayments: formattedPayments,
+    totalOrderAmount: Math.round(totalOrderAmount),
     customerGrowth: 0,
     orderGrowth: 0,
     prescriptionGrowth: 0,
     revenueGrowth: 0,
-    paymentMethodBreakdown: [],
+    paymentMethodBreakdown,
     revenueAnalytics: {
-      deposits: 0,
-      payments: Math.round(totalPayments),
-      outstanding: Math.max(0, Math.round(totalRevenue) - Math.round(totalPayments)),
-      collectionRate: totalRevenue > 0 ? Math.round((totalPayments / totalRevenue) * 100) : 0,
+      deposits: Math.round(totalDeposits),
+      payments: formattedPayments,
+      outstanding: Math.max(0, Math.round(totalOrderAmount) - formattedPayments),
+      collectionRate: totalOrderAmount > 0 ? Math.round((formattedPayments / totalOrderAmount) * 100) : 0,
     },
     lastUpdated: new Date().toISOString(),
     filter,
     currency: 'DA',
   }
+}
+
+export function getLocalRevenueTimeline(userId: string, filter: string = 'month', startParam?: string, endParam?: string): any[] {
+  const d = getDb()
+  const now = new Date()
+
+  let startDate: Date
+  let endDate = new Date(now)
+
+  switch (filter) {
+    case 'today':
+      startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+      break
+    case 'week': {
+      const day = now.getDay()
+      startDate = new Date(now)
+      startDate.setDate(now.getDate() - day)
+      startDate.setHours(0, 0, 0, 0)
+      break
+    }
+    case 'month':
+      startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+      break
+    case 'custom':
+      startDate = startParam ? new Date(startParam) : new Date(now.getFullYear(), now.getMonth(), 1)
+      if (endParam) { endDate = new Date(endParam); endDate.setHours(23, 59, 59, 999) }
+      break
+    default:
+      startDate = new Date(now.getFullYear(), now.getMonth() - 2, 1)
+      break
+  }
+
+  const startIso = startDate.toISOString()
+  const endIso = endDate.toISOString()
+
+  const payments = d.prepare(
+    `SELECT amount, paymentDate FROM payments
+     WHERE (userId=? OR orderId IN (SELECT id FROM orders WHERE userId=?))
+       AND paymentDate >= ? AND paymentDate <= ?
+     ORDER BY paymentDate ASC`
+  ).all(userId, userId, startIso, endIso) as any[]
+
+  const expenses = d.prepare(
+    `SELECT amount, date FROM expenses
+     WHERE userId=? AND date >= ? AND date <= ?
+     ORDER BY date ASC`
+  ).all(userId, startIso, endIso) as any[]
+
+  const dayMap = new Map<string, { revenue: number; expenses: number }>()
+  const cursor = new Date(startDate)
+  while (cursor <= endDate) {
+    dayMap.set(cursor.toISOString().slice(0, 10), { revenue: 0, expenses: 0 })
+    cursor.setDate(cursor.getDate() + 1)
+  }
+
+  for (const p of payments) {
+    const key = new Date(p.paymentDate).toISOString().slice(0, 10)
+    const entry = dayMap.get(key)
+    if (entry) entry.revenue += p.amount
+    else dayMap.set(key, { revenue: p.amount, expenses: 0 })
+  }
+  for (const e of expenses) {
+    const key = new Date(e.date).toISOString().slice(0, 10)
+    const entry = dayMap.get(key)
+    if (entry) entry.expenses += e.amount
+    else dayMap.set(key, { revenue: 0, expenses: e.amount })
+  }
+
+  return Array.from(dayMap.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, vals]) => ({
+      date,
+      revenue: Math.round(vals.revenue),
+      expenses: Math.round(vals.expenses),
+      net: Math.round(vals.revenue - vals.expenses),
+    }))
+}
+
+export function getLocalRecentActivity(userId: string, limit: number = 10): any[] {
+  const d = getDb()
+  const orders = d.prepare(
+    `SELECT o.*, c.firstName, c.lastName FROM orders o
+     LEFT JOIN customers c ON c.id = o.customerId
+     WHERE o.userId=? ORDER BY o.createdAt DESC LIMIT ?`
+  ).all(userId, limit) as any[]
+
+  const payments = d.prepare(
+    `SELECT p.*, o.orderNumber, c.firstName as custFirst, c.lastName as custLast
+     FROM payments p
+     LEFT JOIN orders o ON o.id = p.orderId
+     LEFT JOIN customers c ON c.id = o.customerId
+     WHERE p.userId=? OR p.orderId IN (SELECT id FROM orders WHERE userId=?)
+     ORDER BY p.createdAt DESC LIMIT ?`
+  ).all(userId, userId, limit) as any[]
+
+  const customers = d.prepare(
+    `SELECT * FROM customers WHERE userId=? ORDER BY createdAt DESC LIMIT ?`
+  ).all(userId, limit) as any[]
+
+  const activities: any[] = []
+  for (const o of orders) {
+    activities.push({
+      type: 'order', date: o.createdAt, data: {
+        orderNumber: o.orderNumber, status: o.status,
+        customer: `${o.firstName || ''} ${o.lastName || ''}`.trim(),
+        amount: o.totalPrice,
+      },
+    })
+  }
+  for (const c of customers) {
+    activities.push({
+      type: 'customer', date: c.createdAt, data: {
+        name: `${c.firstName || ''} ${c.lastName || ''}`.trim(),
+        phone: c.phone,
+      },
+    })
+  }
+  for (const p of payments) {
+    activities.push({
+      type: 'payment', date: p.createdAt, data: {
+        amount: p.amount, method: p.paymentMethod,
+        orderNumber: p.orderNumber,
+        customer: `${p.custFirst || ''} ${p.custLast || ''}`.trim(),
+      },
+    })
+  }
+
+  activities.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  return activities.slice(0, limit)
 }

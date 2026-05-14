@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
+import { useConnectivityRefresh } from '@/lib/use-connectivity-refresh'
 import { toast } from 'sonner'
 import { Plus, Search, Package, Pencil, Trash2 } from 'lucide-react'
 
@@ -27,6 +28,7 @@ export default function InventoryPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
 
   useEffect(() => { fetchData() }, [tab, search])
+  useConnectivityRefresh(useCallback(() => { fetchData() }, [tab, search]))
 
   const fetchData = async () => {
     if (!user?.id) return

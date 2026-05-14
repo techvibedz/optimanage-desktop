@@ -1,7 +1,8 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
+import { useConnectivityRefresh } from '@/lib/use-connectivity-refresh'
 import { toast } from 'sonner'
 import { Search, CreditCard, Trash2, Receipt, Calendar, DollarSign, Filter, Eye, Plus, Edit, Loader2 } from 'lucide-react'
 
@@ -31,6 +32,7 @@ export default function PaymentsPage() {
 
   useEffect(() => { fetchPayments() }, [page, search, methodFilter, dateFilter])
   useEffect(() => { fetchExpenses() }, [expenseDate, expenseCategoryFilter])
+  useConnectivityRefresh(useCallback(() => { fetchPayments(); fetchExpenses() }, [page, search, methodFilter, dateFilter, expenseDate, expenseCategoryFilter]))
 
   const fetchPayments = async () => {
     if (!user?.id) return

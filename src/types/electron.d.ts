@@ -23,6 +23,7 @@ export interface ElectronAPI {
   login: (email: string, password: string) => Promise<{ data?: any; error?: string }>
   logout: () => Promise<{ success?: boolean; error?: string }>
   getSession: () => Promise<{ data?: any; error?: string }>
+  onLoggedOut: (callback: () => void) => () => void
 
   // Customers
   getCustomers: (params: { userId: string; query?: string; limit?: number }) => Promise<{ data?: any[]; error?: string }>
@@ -100,6 +101,11 @@ export interface ElectronAPI {
   // Connectivity
   checkConnectivity: () => Promise<boolean>
   onConnectivityStatus: (callback: (online: boolean) => void) => () => void
+
+  // Sync
+  getSyncStatus: () => Promise<SyncStatus>
+  hydrateSyncCache: () => Promise<{ success: boolean; pendingItems: number; isOnline: boolean }>
+  onSyncStatus: (callback: (status: SyncStatus) => void) => () => void
 
   // Mobile Scanner Bridge (Expo companion)
   getMobileScannerInfo: () => Promise<MobileScannerInfo>
