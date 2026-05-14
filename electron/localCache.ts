@@ -428,12 +428,12 @@ export async function hydrateCache(prisma: any, userId: string) {
 
 // ─── Offline READ helpers ───────────────────────────────────────────────────
 
-export function getLocalCustomers(userId: string, search?: string, limit = 500): any[] {
+export function getLocalCustomers(userId: string, search?: string, limit = 5000): any[] {
   const d = getDb()
   if (search) {
     const s = `%${search}%`
-    return d.prepare(`SELECT * FROM customers WHERE userId=? AND (firstName LIKE ? OR lastName LIKE ? OR phone LIKE ? OR email LIKE ?) ORDER BY lastName ASC, firstName ASC LIMIT ?`)
-      .all(userId, s, s, s, s, limit)
+    return d.prepare(`SELECT * FROM customers WHERE userId=? AND (firstName LIKE ? OR lastName LIKE ? OR (firstName || ' ' || lastName) LIKE ? OR phone LIKE ? OR email LIKE ?) ORDER BY lastName ASC, firstName ASC LIMIT ?`)
+      .all(userId, s, s, s, s, s, limit)
   }
   return d.prepare('SELECT * FROM customers WHERE userId=? ORDER BY lastName ASC, firstName ASC LIMIT ?').all(userId, limit)
 }
@@ -444,7 +444,8 @@ export function getLocalCustomer(id: string): any {
 
 export function getLocalOrders(userId: string, params: any = {}): { orders: any[]; total: number } {
   const d = getDb()
-  let where = 'WHERE userId=?'
+  const from = 'FROM orders o LEFT JOIN customers c ON o.customerId = c.id'
+  let where = 'WHERE o.userId=?'
   const args: any[] = [userId]
 
   if (params.status) {
@@ -455,25 +456,39 @@ export function getLocalOrders(userId: string, params: any = {}): { orders: any[
       else if (s === 'completed') expanded.push('completed', 'done', 'finished', 'delivered')
       else expanded.push(s)
     })
-    where += ` AND status IN (${expanded.map(() => '?').join(',')})`
+    where += ` AND o.status IN (${expanded.map(() => '?').join(',')})`
     args.push(...expanded)
   }
 
   if (params.search) {
     const s = `%${params.search}%`
-    where += ` AND (orderNumber LIKE ? OR customerNotes LIKE ? OR technicalNotes LIKE ?)`
-    args.push(s, s, s)
+    where += ` AND (o.orderNumber LIKE ? OR o.customerNotes LIKE ? OR o.technicalNotes LIKE ? OR c.firstName LIKE ? OR c.lastName LIKE ? OR (c.firstName || ' ' || c.lastName) LIKE ?)`
+    args.push(s, s, s, s, s, s)
   }
 
-  const total = (d.prepare(`SELECT COUNT(*) as c FROM orders ${where}`).get(...args) as any).c
+  if (params.startDate) {
+    where += ' AND o.createdAt >= ?'
+    args.push(new Date(params.startDate).toISOString())
+  }
+  if (params.endDate) {
+    where += ' AND o.createdAt <= ?'
+    args.push(new Date(params.endDate).toISOString())
+  }
+
+  if (params.paymentStatus === 'paid') where += ' AND o.balanceDue <= 0'
+  else if (params.paymentStatus === 'partial') where += ' AND o.balanceDue > 0 AND o.depositAmount > 0'
+  else if (params.paymentStatus === 'unpaid') where += ' AND o.balanceDue > 0 AND o.depositAmount = 0'
+
+  if (params.hasBalance === 'true') where += ' AND o.balanceDue > 0'
+
+  const total = (d.prepare(`SELECT COUNT(*) as cnt ${from} ${where}`).get(...args) as any).cnt
   const page = params.page || 1
   const limit = params.limit || 10
   const offset = (page - 1) * limit
 
-  const orders = d.prepare(`SELECT * FROM orders ${where} ORDER BY createdAt DESC LIMIT ? OFFSET ?`)
+  const orders = d.prepare(`SELECT o.* ${from} ${where} ORDER BY o.createdAt DESC LIMIT ? OFFSET ?`)
     .all(...args, limit, offset)
 
-  // Attach customer data to each order
   for (const o of orders) {
     (o as any).customer = d.prepare('SELECT id, firstName, lastName, email FROM customers WHERE id=?').get((o as any).customerId) || null
   }
