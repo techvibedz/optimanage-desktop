@@ -195,7 +195,7 @@ export default function PaymentsPage() {
       case 'cash': return 'bg-green-100 text-green-700 border-green-200'
       case 'card': case 'credit_card': case 'debit_card': return 'bg-blue-100 text-blue-700 border-blue-200'
       case 'check': return 'bg-amber-100 text-amber-700 border-amber-200'
-      case 'bank_transfer': return 'bg-purple-100 text-purple-700 border-purple-200'
+      case 'bank_transfer': return 'bg-teal-100 text-teal-700 border-teal-200'
       default: return 'bg-gray-100 text-gray-700 border-gray-200'
     }
   }

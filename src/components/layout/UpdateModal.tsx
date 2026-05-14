@@ -93,7 +93,7 @@ export default function UpdateModal() {
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
-            {state.phase === 'available' && <><Sparkles className="h-5 w-5 text-violet-500" /> Mise à jour disponible</>}
+            {state.phase === 'available' && <><Sparkles className="h-5 w-5 text-teal-500" /> Mise à jour disponible</>}
             {state.phase === 'downloading' && <><Download className="h-5 w-5 text-blue-500 animate-bounce" /> Téléchargement en cours</>}
             {state.phase === 'downloaded' && <><CheckCircle2 className="h-5 w-5 text-emerald-500" /> Mise à jour prête</>}
             {state.phase === 'error' && <><AlertCircle className="h-5 w-5 text-red-500" /> Erreur de mise à jour</>}
@@ -112,9 +112,9 @@ export default function UpdateModal() {
           {/* Update available */}
           {state.phase === 'available' && (
             <>
-              <div className="rounded-lg border border-violet-200 dark:border-violet-800/50 bg-violet-50 dark:bg-violet-950/30 p-4">
+              <div className="rounded-lg border border-teal-200 dark:border-teal-800/50 bg-teal-50 dark:bg-teal-950/30 p-4">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-semibold text-violet-800 dark:text-violet-200">
+                  <span className="text-sm font-semibold text-teal-800 dark:text-teal-200">
                     Version {state.version}
                   </span>
                   {state.releaseDate && (
@@ -140,7 +140,7 @@ export default function UpdateModal() {
                 </button>
                 <button
                   onClick={handleDownload}
-                  className="flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-lg bg-violet-600 hover:bg-violet-700 text-white transition-colors shadow-sm"
+                  className="flex items-center gap-2 px-5 py-2 text-sm font-semibold rounded-lg bg-teal-600 hover:bg-teal-700 text-white transition-colors shadow-sm"
                 >
                   <Download className="h-4 w-4" />
                   Télécharger

@@ -32,7 +32,7 @@ const defaultSettings: Settings = {
   language: 'en',
   currency: 'DA',
   timezone: 'Africa/Algiers',
-  theme: 'light',
+  theme: 'dark',
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined)

@@ -248,7 +248,7 @@ export default function DashboardPage() {
             <h2 className="text-base font-semibold text-foreground">{t('dashboard.revenueFlow') || 'Revenus'}</h2>
           </div>
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className="w-2 h-2 rounded-full bg-blue-500" />
+            <span className="w-2 h-2 rounded-full bg-teal-500" />
             <span>Bénéfice net / jour</span>
           </div>
         </div>
@@ -359,7 +359,7 @@ export default function DashboardPage() {
                 {activities.map((act: any, i: number) => {
                   const iconMap: Record<string, { icon: any; bg: string; text: string }> = {
                     order: { icon: ShoppingCart, bg: 'bg-blue-100 dark:bg-blue-900/30', text: 'text-blue-600 dark:text-blue-400' },
-                    customer: { icon: UserPlus, bg: 'bg-violet-100 dark:bg-violet-900/30', text: 'text-violet-600 dark:text-violet-400' },
+                    customer: { icon: UserPlus, bg: 'bg-teal-100 dark:bg-teal-900/30', text: 'text-teal-600 dark:text-teal-400' },
                     payment: { icon: CreditCard, bg: 'bg-emerald-100 dark:bg-emerald-900/30', text: 'text-emerald-600 dark:text-emerald-400' },
                   }
                   const { icon: Icon, bg, text } = iconMap[act.type] || iconMap.order

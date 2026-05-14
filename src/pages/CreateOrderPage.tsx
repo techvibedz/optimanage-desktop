@@ -1050,7 +1050,7 @@ export default function CreateOrderPage() {
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {!showNewCustomerForm && !showEditCustomerForm && (
                 <button type="button" onClick={() => setShowNewCustomerForm(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border border-violet-200 dark:border-violet-800/50 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/40 transition-all shadow-sm">
+                  className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border border-teal-200 dark:border-teal-800/50 bg-teal-50 dark:bg-teal-950/30 text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-900/40 transition-all shadow-sm">
                   <Plus className="h-3.5 w-3.5" /> {t('customers.addCustomer') || 'Add New Customer'}
                 </button>
               )}
@@ -1139,7 +1139,7 @@ export default function CreateOrderPage() {
                     type="button"
                     onClick={handleScanOrdonnance}
                     disabled={isScanning}
-                    className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-violet-300 dark:border-violet-700 bg-gradient-to-r from-violet-50 to-purple-50 dark:from-violet-900/30 dark:to-purple-900/30 text-violet-700 dark:text-violet-300 hover:from-violet-100 hover:to-purple-100 dark:hover:from-violet-900/50 dark:hover:to-purple-900/50 transition-all duration-200 disabled:opacity-60 disabled:cursor-wait shadow-sm"
+                    className="flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-lg border border-teal-300 dark:border-teal-700 bg-gradient-to-r from-teal-50 to-cyan-50 dark:from-teal-900/30 dark:to-cyan-900/30 text-teal-700 dark:text-teal-300 hover:from-teal-100 hover:to-cyan-100 dark:hover:from-teal-900/50 dark:hover:to-cyan-900/50 transition-all duration-200 disabled:opacity-60 disabled:cursor-wait shadow-sm"
                   >
                     {isScanning ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -1197,7 +1197,7 @@ export default function CreateOrderPage() {
                       <span className="text-sm font-medium">{t('prescriptions.distanceVision') || 'Distance Vision (VL)'}</span>
                     </label>
                     <label className="flex items-center gap-2.5 cursor-pointer select-none">
-                      <div className={`relative w-9 h-5 rounded-full transition-colors ${newRxHasVP ? 'bg-purple-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                      <div className={`relative w-9 h-5 rounded-full transition-colors ${newRxHasVP ? 'bg-teal-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                         onClick={() => setNewRxHasVP(!newRxHasVP)}>
                         <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${newRxHasVP ? 'translate-x-4' : 'translate-x-0.5'}`} />
                       </div>
@@ -1307,8 +1307,8 @@ export default function CreateOrderPage() {
 
                   {/* ── VP Near Vision ─────────────────────────────── */}
                   {newRxHasVP && (
-                    <div className="border border-purple-200 dark:border-purple-800 rounded-lg p-3 space-y-3">
-                      <h4 className="text-sm font-semibold text-purple-700 dark:text-purple-300">{t('prescriptions.nearVision') || 'Near Vision (VP)'}</h4>
+                    <div className="border border-teal-200 dark:border-teal-800 rounded-lg p-3 space-y-3">
+                      <h4 className="text-sm font-semibold text-teal-700 dark:text-teal-300">{t('prescriptions.nearVision') || 'Near Vision (VP)'}</h4>
 
                       {/* ADD section — auto-calc VP from VL */}
                       {newRxHasVL && (
@@ -1491,11 +1491,11 @@ export default function CreateOrderPage() {
           {(selectedPrescription && selectedPrescription.hasVPData) && (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-border p-5">
               <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-xs flex items-center justify-center font-bold">4</span>
+                <span className="w-6 h-6 rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 text-xs flex items-center justify-center font-bold">4</span>
                 {t('orders.vpNearLenses')}
               </h3>
               {/* Both Eyes selector */}
-              <div className="mb-3 p-3 bg-purple-50/50 dark:bg-purple-900/10 border border-purple-200/50 dark:border-purple-800/30 rounded-lg">
+              <div className="mb-3 p-3 bg-teal-50/50 dark:bg-teal-900/10 border border-teal-200/50 dark:border-teal-800/30 rounded-lg">
                 <LensTypeSelect lensTypes={lensTypes} value={vpRightLensId === vpLeftLensId ? vpRightLensId : ''} label={t('orders.bothEyes') || 'Both Eyes'} t={t}
                   onSelect={(id, price) => { setVpRightLensId(id); setVpRightLensPrice(price); setVpLeftLensId(id); setVpLeftLensPrice(price) }} />
               </div>
@@ -1782,7 +1782,7 @@ export default function CreateOrderPage() {
                 {/* Create All & Print (queue + current) */}
                 {orderQueue.length > 0 && (
                   <button type="button" onClick={() => processQueue(!!customerId && totalPrice > 0)} disabled={isBatchProcessing}
-                    className="w-full py-3 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2">
+                    className="w-full py-3 px-4 bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-700 hover:to-cyan-700 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed text-sm flex items-center justify-center gap-2">
                     <Printer className="h-4 w-4" />
                     {isBatchProcessing ? 'Processing...' : `Create All & Print (${orderQueue.length + (customerId && totalPrice > 0 ? 1 : 0)})`}
                   </button>

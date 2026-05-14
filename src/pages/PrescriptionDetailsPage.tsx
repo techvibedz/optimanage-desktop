@@ -195,7 +195,7 @@ export default function PrescriptionDetailsPage() {
           {hasVP && (
             <div className="bg-white dark:bg-gray-800 rounded-xl border border-border p-5">
               <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <Eye className="h-4 w-4 text-purple-500" />
+                <Eye className="h-4 w-4 text-teal-500" />
                 {t('prescriptions.nearVision')}
               </h3>
               <div className="overflow-x-auto">

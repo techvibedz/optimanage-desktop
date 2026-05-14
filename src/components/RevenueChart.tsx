@@ -58,8 +58,8 @@ export default function RevenueChart({ data, showAmounts, loading }: Props) {
         <AreaChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="gradNet" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25} />
-              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+              <stop offset="5%" stopColor="#14B8A6" stopOpacity={0.25} />
+              <stop offset="95%" stopColor="#14B8A6" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.4} />
@@ -84,7 +84,7 @@ export default function RevenueChart({ data, showAmounts, loading }: Props) {
                 <div className="rounded-xl border border-border bg-background/95 backdrop-blur-sm px-3 py-2.5 shadow-lg">
                   <p className="text-xs font-semibold text-foreground mb-1">{label}</p>
                   <div className="flex items-center gap-2 text-xs">
-                    <span className="w-2 h-2 rounded-full bg-blue-500" />
+                    <span className="w-2 h-2 rounded-full bg-teal-500" />
                     <span className="text-muted-foreground">Bénéfice net</span>
                     <span className="ml-auto font-semibold text-foreground">{fmtTooltip(payload[0].value as number)}</span>
                   </div>
@@ -95,11 +95,11 @@ export default function RevenueChart({ data, showAmounts, loading }: Props) {
           <Area
             type="monotone"
             dataKey="net"
-            stroke="#3b82f6"
+            stroke="#14B8A6"
             strokeWidth={2.5}
             fill="url(#gradNet)"
             dot={false}
-            activeDot={{ r: 4, strokeWidth: 2, fill: '#fff', stroke: '#3b82f6' }}
+            activeDot={{ r: 4, strokeWidth: 2, fill: '#fff', stroke: '#14B8A6' }}
           />
         </AreaChart>
       </ResponsiveContainer>

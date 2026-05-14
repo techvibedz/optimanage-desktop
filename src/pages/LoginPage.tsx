@@ -57,7 +57,7 @@ export default function LoginPage() {
                 placeholder="Enter your email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                className={`login-form-input w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder:text-gray-500 focus:outline-none focus:border-purple-500 ${errors.email ? 'border-red-500' : ''}`}
+                className={`login-form-input w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder:text-gray-500 focus:outline-none focus:border-teal-500 ${errors.email ? 'border-red-500' : ''}`}
                 disabled={isLoading}
               />
               {errors.email && <p className="login-form-error">{errors.email}</p>}
@@ -71,7 +71,7 @@ export default function LoginPage() {
                 placeholder="Enter your password"
                 value={password}
                 onChange={e => setPassword(e.target.value)}
-                className={`login-form-input w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder:text-gray-500 focus:outline-none focus:border-purple-500 ${errors.password ? 'border-red-500' : ''}`}
+                className={`login-form-input w-full px-4 py-2.5 rounded-lg bg-white/5 border border-white/10 text-white placeholder:text-gray-500 focus:outline-none focus:border-teal-500 ${errors.password ? 'border-red-500' : ''}`}
                 disabled={isLoading}
               />
               {errors.password && <p className="login-form-error">{errors.password}</p>}
