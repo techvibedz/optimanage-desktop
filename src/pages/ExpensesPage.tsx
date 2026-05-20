@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
+import { useConnectivityRefresh } from '@/lib/use-connectivity-refresh'
 import { toast } from 'sonner'
 import { Plus, Search, Receipt, Trash2 } from 'lucide-react'
 
@@ -18,6 +19,7 @@ export default function ExpensesPage() {
   const [form, setForm] = useState({ description: '', amount: 0, category: 'Other', date: new Date().toISOString().split('T')[0] })
 
   useEffect(() => { fetchExpenses() }, [page, search])
+  useConnectivityRefresh(useCallback(() => { fetchExpenses() }, [page, search]))
 
   const fetchExpenses = async () => {
     if (!user?.id) return

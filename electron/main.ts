@@ -483,11 +483,18 @@ app.whenReady().then(() => {
             console.warn(`[Sync] Fixing userId in queued expense: ${p.userId} → ${currentUser.id}`)
             p.userId = currentUser.id
           }
-          const data = await prisma.expense.create({ data: pickFields(p, EXPENSE_FIELDS) as any })
+          const fields: any = pickFields(p, EXPENSE_FIELDS)
+          if (fields.date && typeof fields.date === 'string') fields.date = new Date(fields.date)
+          const data = await prisma.expense.create({ data: fields })
           if (p.localId) localCache.deleteLocalExpense(p.localId)
+          localCache.cacheExpense(data)
           return data
         },
-        'expenses:update': (p) => prisma.expense.update({ where: { id: p.id }, data: pickFields(p.updates, EXPENSE_FIELDS) }),
+        'expenses:update': (p) => {
+          const updates: any = pickFields(p.updates, EXPENSE_FIELDS)
+          if (updates.date && typeof updates.date === 'string') updates.date = new Date(updates.date)
+          return prisma.expense.update({ where: { id: p.id }, data: updates })
+        },
         'expenses:delete': (p) => prisma.expense.delete({ where: { id: p.id } }),
         'settings:update': (p) => prisma.setting.update({ where: { userId: p.userId }, data: p.updates }),
       }
@@ -1915,7 +1922,23 @@ function registerIpcHandlers() {
       ])
 
       try { for (const e of expenses) localCache.cacheExpense(e) } catch {}
-      return { data: { expenses, pagination: { total, pages: Math.ceil(total / limit), page, limit } } }
+
+      // Merge in any local-only (unsynced) expenses on the first page so they're visible
+      // while waiting for the sync queue to drain
+      let merged = expenses
+      let mergedTotal = total
+      if (page === 1) {
+        try {
+          const pending = localCache.getLocalExpenses(userId, { ...params, page: 1, limit: 1000 }).expenses
+            .filter((e: any) => typeof e.id === 'string' && e.id.startsWith('local_'))
+          if (pending.length > 0) {
+            merged = [...pending, ...expenses].slice(0, limit)
+            mergedTotal = total + pending.length
+          }
+        } catch {}
+      }
+
+      return { data: { expenses: merged, pagination: { total: mergedTotal, pages: Math.ceil(mergedTotal / limit), page, limit } } }
     } catch (err: any) {
       if (isNetworkError(err)) {
         const { expenses, total } = localCache.getLocalExpenses(params.userId, params)
@@ -1928,13 +1951,17 @@ function registerIpcHandlers() {
   ipcMain.handle('expenses:create', async (_e, expense: any) => {
     try {
       requireDb()
-      if (expense.date && typeof expense.date === 'string') expense.date = new Date(expense.date)
-      const data = await prisma.expense.create({ data: expense })
+      const fields: any = pickFields(expense, EXPENSE_FIELDS)
+      if (fields.date && typeof fields.date === 'string') fields.date = new Date(fields.date)
+      const data = await prisma.expense.create({ data: fields })
       localCache.cacheExpense(data)
       return { data }
     } catch (err: any) {
       if (isNetworkError(err)) {
-        const row = { ...expense, userId: expense.userId || currentUser?.id, id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+        const isoDate = expense.date
+          ? (expense.date instanceof Date ? expense.date.toISOString() : new Date(expense.date).toISOString())
+          : new Date().toISOString()
+        const row = { ...expense, date: isoDate, userId: expense.userId || currentUser?.id, id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
         localCache.cacheExpense(row)
         syncManager.addToQueue('expenses:create', { ...row, localId: row.id }, row.id, currentUser?.id)
         return { data: row }
