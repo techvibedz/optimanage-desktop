@@ -444,7 +444,15 @@ app.whenReady().then(() => {
         },
         'lensTypes:update': (p) => prisma.lensType.update({ where: { id: p.id }, data: pickFields(p.updates, LENS_TYPE_FIELDS) }),
         'lensTypes:delete': (p) => prisma.lensType.delete({ where: { id: p.id } }),
-        'contactLenses:create': (p) => prisma.contactLens.create({ data: pickFields(p, CONTACT_LENS_FIELDS) as any }),
+        'contactLenses:create': async (p) => {
+          if (currentUser && p.userId !== currentUser.id) {
+            console.warn(`[Sync] Fixing userId in queued contactLens: ${p.userId} → ${currentUser.id}`)
+            p.userId = currentUser.id
+          }
+          const data = await prisma.contactLens.create({ data: pickFields(p, CONTACT_LENS_FIELDS) as any })
+          if (p.localId) localCache.deleteLocalContactLens(p.localId)
+          return data
+        },
         'contactLenses:update': (p) => prisma.contactLens.update({ where: { id: p.id }, data: pickFields(p.updates, CONTACT_LENS_FIELDS) }),
         'contactLenses:delete': (p) => prisma.contactLens.delete({ where: { id: p.id } }),
         'payments:create': async (p) => {
@@ -953,6 +961,10 @@ function queueUnsyncedLocalRecords(userId: string) {
 
   try {
     queueRows('lensTypes:create', d.prepare(`SELECT * FROM lensTypes WHERE id LIKE 'local_%' AND userId=?`).all(userId) as any[])
+  } catch { /* table might not exist */ }
+
+  try {
+    queueRows('contactLenses:create', d.prepare(`SELECT * FROM contactLenses WHERE id LIKE 'local_%' AND userId=?`).all(userId) as any[])
   } catch { /* table might not exist */ }
 
   try {
@@ -1713,36 +1725,64 @@ function registerIpcHandlers() {
         ]
       }
       const data = await prisma.contactLens.findMany({ where, orderBy: { brand: 'asc' } })
+      try { for (const c of data) localCache.cacheContactLens(c) } catch {}
       return { data }
     } catch (err: any) {
-      if (isNetworkError(err)) { return { data: [] } }
+      if (isNetworkError(err)) {
+        return { data: localCache.getLocalContactLenses(params.userId, params.search) }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('contactLenses:create', async (_e, contactLens: any) => {
-    try { return { data: await prisma.contactLens.create({ data: pickFields(contactLens, CONTACT_LENS_FIELDS) as any }) } }
-    catch (err: any) {
+    try {
+      requireDb()
+      const data = await prisma.contactLens.create({ data: pickFields(contactLens, CONTACT_LENS_FIELDS) as any })
+      localCache.cacheContactLens(data)
+      return { data }
+    } catch (err: any) {
       if (isNetworkError(err)) {
-        syncManager.addToQueue('contactLenses:create', contactLens, `local_${Date.now()}`, currentUser?.id)
-        return { data: { ...contactLens, id: `local_${Date.now()}`, createdAt: new Date().toISOString() } }
+        const row = { ...pickFields(contactLens, CONTACT_LENS_FIELDS), userId: contactLens.userId || currentUser?.id, id: `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+        localCache.cacheContactLens(row)
+        syncManager.addToQueue('contactLenses:create', { ...row, localId: row.id }, row.id, currentUser?.id)
+        return { data: row }
       }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('contactLenses:update', async (_e, id: string, updates: any) => {
-    try { return { data: await prisma.contactLens.update({ where: { id }, data: pickFields(updates, CONTACT_LENS_FIELDS) }) } }
-    catch (err: any) {
-      if (isNetworkError(err)) { syncManager.addToQueue('contactLenses:update', { id, updates }, id, currentUser?.id); return { data: updates } }
+    try {
+      requireDb()
+      const data = await prisma.contactLens.update({ where: { id }, data: pickFields(updates, CONTACT_LENS_FIELDS) })
+      localCache.cacheContactLens(data)
+      return { data }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        const existing = localCache.getLocalContactLenses(currentUser?.id || '').find((c: any) => c.id === id)
+        if (existing) localCache.cacheContactLens({ ...existing, ...updates, updatedAt: new Date().toISOString() })
+        if (id.startsWith('local_')) syncManager.updateCreatePayload(id, updates)
+        else syncManager.addToQueue('contactLenses:update', { id, updates }, id, currentUser?.id)
+        return { data: updates }
+      }
       return { error: err.message }
     }
   })
 
   ipcMain.handle('contactLenses:delete', async (_e, id: string) => {
-    try { await prisma.contactLens.delete({ where: { id } }); return { success: true } }
-    catch (err: any) {
-      if (isNetworkError(err)) { if (id.startsWith('local_')) syncManager.removeFromQueue(id); else syncManager.addToQueue('contactLenses:delete', { id }, id, currentUser?.id); return { success: true } }
+    try {
+      requireDb()
+      await prisma.contactLens.delete({ where: { id } })
+      localCache.deleteLocalContactLens(id)
+      return { success: true }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        localCache.deleteLocalContactLens(id)
+        if (id.startsWith('local_')) syncManager.removeFromQueue(id)
+        else syncManager.addToQueue('contactLenses:delete', { id }, id, currentUser?.id)
+        return { success: true }
+      }
       return { error: err.message }
     }
   })

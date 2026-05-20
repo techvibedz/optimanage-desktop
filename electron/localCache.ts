@@ -88,6 +88,16 @@ function initTables() {
       userId TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS contactLenses (
+      id TEXT PRIMARY KEY,
+      brand TEXT NOT NULL,
+      model TEXT,
+      price REAL NOT NULL,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      userId TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS orders (
       id TEXT PRIMARY KEY,
       orderNumber TEXT NOT NULL,
@@ -388,6 +398,19 @@ export function deleteLocalLensType(id: string) {
   getDb().prepare('DELETE FROM lensTypes WHERE id=?').run(id)
 }
 
+export function cacheContactLens(c: any) {
+  const d = getDb()
+  d.prepare(`INSERT OR REPLACE INTO contactLenses (id,brand,model,price,createdAt,updatedAt,userId)
+    VALUES (?,?,?,?,?,?,?)`).run(
+    c.id, c.brand, c.model || null, c.price,
+    toIso(c.createdAt), toIso(c.updatedAt), c.userId
+  )
+}
+
+export function deleteLocalContactLens(id: string) {
+  getDb().prepare('DELETE FROM contactLenses WHERE id=?').run(id)
+}
+
 export function deleteLocalExpense(id: string) {
   getDb().prepare('DELETE FROM expenses WHERE id=?').run(id)
 }
@@ -396,13 +419,14 @@ export function deleteLocalExpense(id: string) {
 export async function hydrateCache(prisma: any, userId: string) {
   console.log('[LocalCache] Hydrating local cache for user', userId)
   try {
-    const [customers, orders, payments, prescriptions, frames, lensTypes, settings, expenses] = await Promise.all([
+    const [customers, orders, payments, prescriptions, frames, lensTypes, contactLenses, settings, expenses] = await Promise.all([
       prisma.customer.findMany({ where: { userId } }),
       prisma.order.findMany({ where: { userId } }),
       prisma.payment.findMany({ where: { OR: [{ userId }, { order: { userId } }] } }),
       prisma.prescription.findMany({ where: { customer: { userId } } }),
       prisma.frame.findMany({ where: { userId } }),
       prisma.lensType.findMany({ where: { userId } }),
+      prisma.contactLens.findMany({ where: { userId } }),
       prisma.setting.findMany({ where: { userId } }),
       prisma.expense.findMany({ where: { userId } }),
     ])
@@ -415,12 +439,13 @@ export async function hydrateCache(prisma: any, userId: string) {
       for (const rx of prescriptions) cachePrescription(rx)
       for (const f of frames) cacheFrame(f)
       for (const lt of lensTypes) cacheLensType(lt)
+      for (const cl of contactLenses) cacheContactLens(cl)
       for (const s of settings) cacheSetting(s)
       for (const e of expenses) cacheExpense(e)
     })
     tx()
 
-    console.log(`[LocalCache] Hydrated: ${customers.length} customers, ${orders.length} orders, ${payments.length} payments, ${prescriptions.length} prescriptions, ${frames.length} frames, ${lensTypes.length} lensTypes`)
+    console.log(`[LocalCache] Hydrated: ${customers.length} customers, ${orders.length} orders, ${payments.length} payments, ${prescriptions.length} prescriptions, ${frames.length} frames, ${lensTypes.length} lensTypes, ${contactLenses.length} contactLenses`)
   } catch (err: any) {
     console.error('[LocalCache] Hydration failed:', err.message)
   }
@@ -571,6 +596,15 @@ export function getLocalPayments(userId: string, params: any = {}): { payments: 
 
 export function getLocalFrames(userId: string): any[] {
   return getDb().prepare('SELECT * FROM frames WHERE userId=? ORDER BY brand ASC').all(userId)
+}
+
+export function getLocalContactLenses(userId: string, search?: string): any[] {
+  const d = getDb()
+  if (search) {
+    const s = `%${search}%`
+    return d.prepare(`SELECT * FROM contactLenses WHERE userId=? AND (brand LIKE ? OR model LIKE ?) ORDER BY brand ASC`).all(userId, s, s)
+  }
+  return d.prepare('SELECT * FROM contactLenses WHERE userId=? ORDER BY brand ASC').all(userId)
 }
 
 export function getLocalLensTypes(userId: string): any[] {
