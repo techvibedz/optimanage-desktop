@@ -305,6 +305,9 @@ app.whenReady().then(() => {
 
           const fields: any = pickFields(p, CUSTOMER_FIELDS)
           fields.userId = resolvedUserId
+          // Preserve the original offline creation date — otherwise Prisma's
+          // @default(now()) stamps the sync day instead of the creation day.
+          if (p.createdAt) fields.createdAt = new Date(p.createdAt)
           // Strip any stale date strings that Prisma might reject
           if (fields.dateOfBirth === '' || fields.dateOfBirth === 'null') delete fields.dateOfBirth
           console.log('[Sync] Creating customer with userId:', fields.userId, 'sessionId:', currentUser?.id, 'queuedId:', p.userId)
@@ -319,6 +322,10 @@ app.whenReady().then(() => {
         'customers:delete': (p) => prisma.customer.delete({ where: { id: p.id } }),
         'orders:create': async (p) => {
           const picked: any = pickFields(p, ORDER_FIELDS)
+          // Preserve the original offline creation date — otherwise Prisma's
+          // @default(now()) stamps the sync day instead of the creation day,
+          // making orders created offline appear on the day they synced.
+          if (p.createdAt) picked.createdAt = new Date(p.createdAt)
           // Resolve userId from server with fallback chain
           let resolvedUserId: string | null = null
           if (currentUser?.email) {
@@ -353,6 +360,7 @@ app.whenReady().then(() => {
                 const mappedCust = localCache.getLocalIdMapping(rxFields.customerId)
                 rxFields.customerId = mappedCust || picked.customerId
               }
+              if (localRx.createdAt) rxFields.createdAt = new Date(localRx.createdAt)
               console.log(`[Sync] Inline-syncing prescription ${picked.prescriptionId} for order`)
               const rxResult = await prisma.prescription.create({ data: rxFields })
               localCache.cacheLocalIdMapping(picked.prescriptionId, rxResult.id, 'prescription')
@@ -379,8 +387,11 @@ app.whenReady().then(() => {
 
           const data = await prisma.order.create({ data: picked })
           if (depositAmount > 0) {
+            // Stamp the deposit with the order's original creation date so
+            // revenue lands on the correct day, not the sync day.
+            const depositDate = picked.createdAt || data.createdAt
             await prisma.payment.create({
-              data: { orderId: data.id, amount: depositAmount, paymentMethod: 'cash', receiptNumber: `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, reference: 'Initial deposit', paymentDate: new Date(), userId: picked.userId }
+              data: { orderId: data.id, amount: depositAmount, paymentMethod: 'cash', receiptNumber: `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, reference: 'Initial deposit', paymentDate: depositDate, createdAt: depositDate, userId: picked.userId }
             })
           }
           if (frameId) {
@@ -413,7 +424,9 @@ app.whenReady().then(() => {
             if (mappedCustomerId) p.customerId = mappedCustomerId
           }
           if (typeof p.customerId === 'string' && p.customerId.startsWith('local_')) throw new Error(`Unresolved local customer reference: ${p.customerId}`)
-          const data = await prisma.prescription.create({ data: pickFields(p, PRESCRIPTION_FIELDS) as any })
+          const rxData: any = pickFields(p, PRESCRIPTION_FIELDS)
+          if (p.createdAt) rxData.createdAt = new Date(p.createdAt)
+          const data = await prisma.prescription.create({ data: rxData })
           if (p.localId) {
             localCache.cacheLocalIdMapping(p.localId, data.id, 'prescription')
             localCache.deleteSyncedLocalPrescription(p.localId)
@@ -461,6 +474,7 @@ app.whenReady().then(() => {
             p.userId = currentUser.id
           }
           const picked: any = pickFields(p, PAYMENT_FIELDS)
+          if (p.createdAt) picked.createdAt = new Date(p.createdAt)
           picked.receiptNumber = `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
           if (typeof picked.orderId === 'string' && picked.orderId.startsWith('local_')) {
             const mappedOrderId = localCache.getLocalIdMapping(picked.orderId)
@@ -485,6 +499,7 @@ app.whenReady().then(() => {
           }
           const fields: any = pickFields(p, EXPENSE_FIELDS)
           if (fields.date && typeof fields.date === 'string') fields.date = new Date(fields.date)
+          if (p.createdAt) fields.createdAt = new Date(p.createdAt)
           const data = await prisma.expense.create({ data: fields })
           if (p.localId) localCache.deleteLocalExpense(p.localId)
           localCache.cacheExpense(data)
@@ -1109,7 +1124,7 @@ function registerIpcHandlers() {
         if (!err._offlineFastPath) markDbUnreachable()
         const sanitized = { ...pickFields(customer, CUSTOMER_FIELDS), userId: customer.userId || currentUser?.id }
         const data = localCache.createLocalCustomer(sanitized)
-        syncManager.addToQueue('customers:create', { ...sanitized, localId: data.id }, data.id, currentUser?.id)
+        syncManager.addToQueue('customers:create', { ...sanitized, createdAt: data.createdAt, localId: data.id }, data.id, currentUser?.id)
         return { data }
       }
       return { error: err.message }
@@ -1342,7 +1357,7 @@ function registerIpcHandlers() {
         if (!err._offlineFastPath) markDbUnreachable()
         orderData.userId = orderData.userId || currentUser?.id
         const data = localCache.createLocalOrder(orderData, orderData.userId)
-        syncManager.addToQueue('orders:create', { ...orderData, localId: data.id }, data.id, currentUser?.id)
+        syncManager.addToQueue('orders:create', { ...orderData, createdAt: data.createdAt, localId: data.id }, data.id, currentUser?.id)
         return { data }
       }
       return { error: err.message }
@@ -1527,7 +1542,7 @@ function registerIpcHandlers() {
       if (isNetworkError(err)) {
         if (!err._offlineFastPath) markDbUnreachable()
         const data = localCache.createLocalPrescription(prescription)
-        syncManager.addToQueue('prescriptions:create', { ...prescription, localId: data.id }, data.id, currentUser?.id)
+        syncManager.addToQueue('prescriptions:create', { ...prescription, createdAt: data.createdAt, localId: data.id }, data.id, currentUser?.id)
         return { data: data }
       }
       return { error: err.message }
@@ -1877,7 +1892,7 @@ function registerIpcHandlers() {
         if (!err._offlineFastPath) markDbUnreachable()
         const safePayment = { ...payment, userId: payment.userId || currentUser?.id }
         const data = localCache.createLocalPayment(safePayment)
-        syncManager.addToQueue('payments:create', { ...safePayment, localId: data.id }, data.id, currentUser?.id)
+        syncManager.addToQueue('payments:create', { ...safePayment, createdAt: data.createdAt, localId: data.id }, data.id, currentUser?.id)
         return { data }
       }
       return { error: err.message }
