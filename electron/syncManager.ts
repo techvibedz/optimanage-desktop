@@ -10,6 +10,32 @@ export interface QueueItem {
   createdAt: string
   retries: number
   userId?: string     // which user created this item — prevents cross-account sync
+  nextRetryAt?: string // ISO time before which this item is skipped (exponential backoff)
+}
+
+// ─── Reliability tuning ────────────────────────────────────────────────────────
+// A single handler must never hang the whole sync loop. If a Prisma call stalls
+// (common on a half-open socket after an offline→online flip), we time it out so
+// processQueue always resolves and the in-progress flag is always released.
+const HANDLER_TIMEOUT_MS = 25_000
+
+// Race a handler against a timeout. Rejects with a timeout error instead of
+// hanging forever. Idempotency guards (order number / receipt number lookups)
+// make a retry after a false-timeout safe.
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Handler timeout after ${ms}ms for ${label}`)), ms)
+    p.then(
+      (v) => { clearTimeout(timer); resolve(v) },
+      (e) => { clearTimeout(timer); reject(e) },
+    )
+  })
+}
+
+// Exponential backoff (capped) so a failing item doesn't hammer the DB every 5s.
+// retries 1→2s, 2→4s, 3→8s … capped at 5 minutes.
+function backoffMs(retries: number): number {
+  return Math.min(5 * 60_000, 1000 * Math.pow(2, Math.min(retries, 8)))
 }
 
 // ─── Queue file path ─────────────────────────────────────────────────────────
@@ -222,6 +248,13 @@ export async function processQueue(
       continue
     }
 
+    // Backoff: a recently-failed item waits before its next attempt so it doesn't
+    // churn every 5s. It stays in the queue, just untouched until its time comes.
+    if (item.nextRetryAt && new Date(item.nextRetryAt).getTime() > Date.now()) {
+      remaining.push(item)
+      continue
+    }
+
     // Replace any local_ references in the payload with their real synced IDs
     if (Object.keys(idMap).length > 0) {
       const payloadStr = JSON.stringify(item.payload)
@@ -236,7 +269,9 @@ export async function processQueue(
     }
 
     try {
-      const result = await handler(item.payload)
+      const result = await withTimeout(handler(item.payload), HANDLER_TIMEOUT_MS, `${item.action} (${item.id})`)
+      // A successful attempt clears any pending backoff.
+      delete item.nextRetryAt
       // Store the ID mapping if the handler returned a record with an id
       if (result?.id && item.id?.startsWith('local_')) {
         idMap[item.id] = result.id
@@ -246,10 +281,19 @@ export async function processQueue(
       console.log(`[SyncManager] ✓ Synced ${item.action} (${item.id})`)
     } catch (err: any) {
       const msg = String(err?.message || '')
+      const isTimeout = msg.includes('Handler timeout after')
       const isConnectionError = msg.includes("Can't reach database server") || msg.includes('ECONNREFUSED') || msg.includes('ETIMEDOUT') || msg.includes('ENOTFOUND') || err?.code === 'P1001' || err?.code === 'P1002'
-      if (isConnectionError) {
-        // DB unreachable — stop processing, keep all remaining items
-        console.warn(`[SyncManager] DB unreachable, aborting sync. Will retry later.`)
+      if (isConnectionError || isTimeout) {
+        // DB unreachable or stalling — stop this run to bound its duration, keep all
+        // remaining items. A stalled item gets a backoff stamp so it doesn't lead the
+        // next run straight back into the same stall.
+        if (isTimeout) {
+          item.retries++
+          item.nextRetryAt = new Date(Date.now() + backoffMs(item.retries)).toISOString()
+          console.warn(`[SyncManager] ⏱ ${item.action} (${item.id}) timed out (retry ${item.retries}). Aborting run, will retry later.`)
+        } else {
+          console.warn(`[SyncManager] DB unreachable, aborting sync. Will retry later.`)
+        }
         remaining.push(item, ...queue.slice(queue.indexOf(item) + 1))
         break
       }
@@ -298,7 +342,10 @@ export async function processQueue(
           console.error(`[SyncManager] ✗ Dropped ${item.action} (${item.id}) after 20 retries: ${msg}${err?.code ? ` [${err.code}]` : ''}`)
         }
       } else {
-        console.warn(`[SyncManager] ✗ Failed ${item.action} (${item.id}), retry ${item.retries}: ${msg}${err?.code ? ` [${err.code}]` : ''}`)
+        // Space out the next attempt instead of retrying every 5s.
+        item.nextRetryAt = new Date(Date.now() + backoffMs(item.retries)).toISOString()
+        const waitS = Math.round(backoffMs(item.retries) / 1000)
+        console.warn(`[SyncManager] ✗ Failed ${item.action} (${item.id}), retry ${item.retries} in ~${waitS}s: ${msg}${err?.code ? ` [${err.code}]` : ''}`)
         remaining.push(item)
       }
     }

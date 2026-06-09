@@ -376,16 +376,31 @@ app.whenReady().then(() => {
 
   // When connectivity is restored, trigger sync processing
   let syncInProgress = false
+  let syncStartedAt = 0
+  // Safety net: if a run somehow never releases the in-progress flag (an
+  // unforeseen hang outside the per-item timeout), this watchdog reclaims it so
+  // sync can never wedge permanently until the app restarts.
+  const SYNC_WATCHDOG_MS = 180_000
   async function processSyncQueue() {
-    if (syncInProgress) return
+    if (syncInProgress) {
+      if (syncStartedAt && Date.now() - syncStartedAt > SYNC_WATCHDOG_MS) {
+        console.warn(`[Sync] Watchdog: a run has been stuck for ${Math.round((Date.now() - syncStartedAt) / 1000)}s — forcing recovery`)
+        syncInProgress = false
+      } else {
+        return
+      }
+    }
     if (!isDbAvailable()) return
     syncInProgress = true
-    {
+    syncStartedAt = Date.now()
+    // The whole body runs inside try/finally so the flag is ALWAYS released —
+    // even if any step throws. A leaked flag was the main cause of sync silently
+    // wedging and "never syncing" until restart.
+    try {
       // Ensure Prisma connection is fresh after offline period
       try { await prisma.$connect() } catch (e: any) {
         console.warn('[Sync] Prisma reconnect failed, skipping sync:', e?.message)
         markDbUnreachable()
-        syncInProgress = false
         return
       }
       // Verify DB is actually queryable with a lightweight check
@@ -395,13 +410,12 @@ app.whenReady().then(() => {
       } catch (e: any) {
         console.warn('[Sync] DB not queryable, skipping sync:', e?.message?.slice(0, 200))
         markDbUnreachable()
-        syncInProgress = false
         return
       }
-      await repairSessionUserId()
-      if (!currentUser) { syncInProgress = false; return }
-      queueUnsyncedLocalRecords(currentUser.id)
-      if ((currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength()) === 0) { syncInProgress = false; return }
+      try { await repairSessionUserId() } catch (e: any) { console.warn('[Sync] repairSessionUserId failed (continuing):', e?.message || e) }
+      if (!currentUser) return
+      try { queueUnsyncedLocalRecords(currentUser.id) } catch (e: any) { console.warn('[Sync] queueUnsyncedLocalRecords failed (continuing):', e?.message || e) }
+      if ((currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength()) === 0) return
       const handlers: Record<string, (payload: any) => Promise<any>> = {
         'customers:create': async (p) => {
           // Resolve userId from server — try multiple strategies
@@ -552,9 +566,16 @@ app.whenReady().then(() => {
             // Stamp the deposit with the order's original creation date so
             // revenue lands on the correct day, not the sync day.
             const depositDate = picked.createdAt || data.createdAt
-            await prisma.payment.create({
-              data: { orderId: data.id, amount: depositAmount, paymentMethod: 'cash', receiptNumber: `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, reference: 'Initial deposit', paymentDate: depositDate, createdAt: depositDate, userId: picked.userId }
-            })
+            // Deterministic receipt key (one deposit per order) makes this insert
+            // idempotent: if a prior attempt created the order but this handler was
+            // retried, the deposit is recognised instead of inserted twice.
+            const depositReceipt = `DEP-${data.id}`
+            const existingDeposit = await prisma.payment.findUnique({ where: { receiptNumber: depositReceipt }, select: { id: true } })
+            if (!existingDeposit) {
+              await prisma.payment.create({
+                data: { orderId: data.id, amount: depositAmount, paymentMethod: 'cash', receiptNumber: depositReceipt, reference: 'Initial deposit', paymentDate: depositDate, createdAt: depositDate, userId: picked.userId }
+              })
+            }
           }
           if (frameId) {
             await prisma.frame.updateMany({ where: { id: frameId, stock: { gt: 0 } }, data: { stock: { decrement: 1 } } })
@@ -637,19 +658,36 @@ app.whenReady().then(() => {
           }
           const picked: any = pickFields(p, PAYMENT_FIELDS)
           if (p.createdAt) picked.createdAt = new Date(p.createdAt)
-          picked.receiptNumber = `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+          // Use the stable receiptNumber minted when the payment was created offline.
+          // Only mint a fresh one for legacy queue items that predate this fix —
+          // never regenerate per attempt, or a retried insert would duplicate money.
+          if (!picked.receiptNumber) picked.receiptNumber = `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
           if (typeof picked.orderId === 'string' && picked.orderId.startsWith('local_')) {
             const mappedOrderId = localCache.getLocalIdMapping(picked.orderId)
             if (mappedOrderId) picked.orderId = mappedOrderId
           }
           if (typeof picked.orderId === 'string' && picked.orderId.startsWith('local_')) throw new Error(`Unresolved local order reference: ${picked.orderId}`)
-          const data = await prisma.payment.create({ data: picked })
-          if (picked.orderId) {
-            const order = await prisma.order.findUnique({ where: { id: picked.orderId }, select: { balanceDue: true, depositAmount: true } })
-            if (order) {
-              await prisma.order.update({ where: { id: picked.orderId }, data: { balanceDue: Math.max(0, (order.balanceDue || 0) - picked.amount), depositAmount: (order.depositAmount || 0) + picked.amount } })
-            }
+          // Idempotency: if a payment with this receipt already synced (e.g. a prior
+          // attempt's insert landed but its response was lost), adopt it instead of
+          // inserting a second row and re-applying the balance change.
+          const existingPayment = await prisma.payment.findUnique({ where: { receiptNumber: picked.receiptNumber }, select: { id: true } })
+          if (existingPayment) {
+            console.log(`[Sync] Payment ${picked.receiptNumber} already on server (${existingPayment.id}), adopting`)
+            if (p.localId) localCache.deleteLocalPayment(p.localId)
+            return existingPayment
           }
+          // Insert the payment and adjust the order balance atomically, so a retry
+          // can never leave a payment recorded without its balance update (or vice-versa).
+          const data = await prisma.$transaction(async (tx: any) => {
+            const created = await tx.payment.create({ data: picked })
+            if (picked.orderId) {
+              const order = await tx.order.findUnique({ where: { id: picked.orderId }, select: { balanceDue: true, depositAmount: true } })
+              if (order) {
+                await tx.order.update({ where: { id: picked.orderId }, data: { balanceDue: Math.max(0, (order.balanceDue || 0) - picked.amount), depositAmount: (order.depositAmount || 0) + picked.amount } })
+              }
+            }
+            return created
+          })
           if (p.localId) localCache.deleteLocalPayment(p.localId)
           return data
         },
@@ -682,27 +720,31 @@ app.whenReady().then(() => {
         try { await reconcileOrphanedOrderRefs(currentUser.id) }
         catch (e: any) { console.warn('[Sync] Reconcile pass failed:', e?.message || e) }
       }
-      syncManager.processQueue(handlers, localCache.getAllLocalIdMappings(), currentUser?.id).then((count) => {
-        if (count > 0) {
-          console.log(`[Sync] Processed ${count} queued items — re-hydrating local cache`)
-          if (currentUser) {
-            localCache.hydrateCache(prisma, currentUser.id).then(() => {
-              console.log('[Sync] Local cache re-hydrated after sync')
-              mainWindow?.webContents.send('sync:status', {
-                pendingItems: currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength(),
-                isOnline: true,
-              })
-            }).catch((err: any) => console.warn('[Sync] Re-hydrate after sync failed:', err?.message || err))
-          } else {
+      const count = await syncManager.processQueue(handlers, localCache.getAllLocalIdMappings(), currentUser?.id)
+      if (count > 0) {
+        console.log(`[Sync] Processed ${count} queued items — re-hydrating local cache`)
+        if (currentUser) {
+          try {
+            await localCache.hydrateCache(prisma, currentUser.id)
+            console.log('[Sync] Local cache re-hydrated after sync')
             mainWindow?.webContents.send('sync:status', {
-              pendingItems: syncManager.getQueueLength(),
+              pendingItems: currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength(),
               isOnline: true,
             })
+          } catch (err: any) {
+            console.warn('[Sync] Re-hydrate after sync failed:', err?.message || err)
           }
+        } else {
+          mainWindow?.webContents.send('sync:status', {
+            pendingItems: syncManager.getQueueLength(),
+            isOnline: true,
+          })
         }
-      }).catch((err: any) => {
-        console.warn('[Sync] Queue processing failed:', err?.message || err)
-      }).finally(() => { syncInProgress = false })
+      }
+    } catch (err: any) {
+      console.warn('[Sync] Queue processing failed:', err?.message || err)
+    } finally {
+      syncInProgress = false
     }
   }
   setInterval(processSyncQueue, 5000)
@@ -2173,7 +2215,10 @@ function registerIpcHandlers() {
         if (!err._offlineFastPath) markDbUnreachable()
         const safePayment = { ...payment, userId: payment.userId || currentUser?.id }
         const data = localCache.createLocalPayment(safePayment)
-        syncManager.addToQueue('payments:create', { ...safePayment, createdAt: data.createdAt, localId: data.id }, data.id, currentUser?.id)
+        // Carry the stable receiptNumber minted at creation into the queue so the
+        // sync handler can use it as an idempotency key — a retried payment is
+        // then recognised instead of inserted twice (which would double-count money).
+        syncManager.addToQueue('payments:create', { ...safePayment, receiptNumber: data.receiptNumber, createdAt: data.createdAt, localId: data.id }, data.id, currentUser?.id)
         return { data }
       }
       return { error: err.message }
