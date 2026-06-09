@@ -649,19 +649,27 @@ export function createLocalCustomer(data: any): any {
   return row
 }
 
-export function createLocalOrder(data: any, userId: string): any {
+// Highest ORD-NNN currently in the local cache for a user. The local cache
+// mirrors every server order we've seen PLUS any not-yet-synced offline orders,
+// so it is the single authority for the next order number — online and offline.
+export function getMaxOrderNumber(userId: string): number {
   const d = getDb()
-  // Compute order number from local cache — scan ALL orders to find the real max number
-  const allOrders = d.prepare(`SELECT orderNumber FROM orders WHERE userId=?`).all(userId) as any[]
+  const rows = d.prepare(`SELECT orderNumber FROM orders WHERE userId=?`).all(userId) as any[]
   let maxNum = 0
-  for (const o of allOrders) {
+  for (const o of rows) {
     const match = o.orderNumber?.match(/ORD-(\d+)/)
     if (match) {
       const num = parseInt(match[1], 10)
       if (num > maxNum) maxNum = num
     }
   }
-  const orderNumber = `ORD-${String(maxNum + 1).padStart(3, '0')}`
+  return maxNum
+}
+
+export function createLocalOrder(data: any, userId: string): any {
+  const d = getDb()
+  // Compute order number from local cache — scan ALL orders to find the real max number
+  const orderNumber = `ORD-${String(getMaxOrderNumber(userId) + 1).padStart(3, '0')}`
   const id = `local_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
   const now = new Date().toISOString()
 

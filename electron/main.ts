@@ -321,6 +321,17 @@ app.whenReady().then(() => {
         'customers:update': (p) => prisma.customer.update({ where: { id: p.id }, data: pickFields(p.updates, CUSTOMER_FIELDS) }),
         'customers:delete': (p) => prisma.customer.delete({ where: { id: p.id } }),
         'orders:create': async (p) => {
+          // Idempotency: if this offline order was already synced in a prior cycle
+          // (e.g. a crash left it in the queue), adopt the existing server record
+          // instead of creating a second one with a fresh number.
+          if (p.localId) {
+            const alreadySynced = localCache.getLocalIdMapping(p.localId)
+            if (alreadySynced) {
+              console.log(`[Sync] Order ${p.localId} already synced → ${alreadySynced}, skipping`)
+              localCache.deleteLocalOrder(p.localId)
+              return { id: alreadySynced }
+            }
+          }
           const picked: any = pickFields(p, ORDER_FIELDS)
           // Preserve the original offline creation date — otherwise Prisma's
           // @default(now()) stamps the sync day instead of the creation day,
@@ -376,16 +387,32 @@ app.whenReady().then(() => {
           const localCustomerId = typeof p.customerId === 'string' && p.customerId.startsWith('local_') ? p.customerId : null
           const localPrescriptionId = typeof p.prescriptionId === 'string' && p.prescriptionId.startsWith('local_') ? p.prescriptionId : null
 
-          // Recompute order number server-side to avoid duplicates.
-          const allOrders = await prisma.order.findMany({ where: { userId: picked.userId }, select: { orderNumber: true } })
-          let maxNum = 0
-          for (const o of allOrders) {
-            const match = o.orderNumber?.match(/ORD-(\d+)/)
-            if (match) { const num = parseInt(match[1], 10); if (num > maxNum) maxNum = num }
+          // Preserve the order number the user already wrote on the job offline.
+          // First check whether that number is already taken on the server:
+          //  • same number + same customer  → this order was already synced; adopt it (idempotent).
+          //  • same number + different order → genuine collision (e.g. a second device);
+          //    keep this order but let the server assign a fresh number so nothing is lost.
+          const preferredNumber: string | undefined = picked.orderNumber
+          if (preferredNumber) {
+            const existingByNumber = await prisma.order.findUnique({
+              where: { orderNumber_userId: { orderNumber: preferredNumber, userId: picked.userId } },
+              select: { id: true, customerId: true },
+            })
+            if (existingByNumber) {
+              if (existingByNumber.customerId === picked.customerId) {
+                console.log(`[Sync] Order ${preferredNumber} already on server (${existingByNumber.id}), adopting`)
+                if (p.localId) {
+                  localCache.cacheLocalIdMapping(p.localId, existingByNumber.id, 'order')
+                  localCache.deleteLocalOrder(p.localId)
+                }
+                return existingByNumber
+              }
+              console.warn(`[Sync] Order number ${preferredNumber} is taken by a different order — assigning a fresh number`)
+              picked.orderNumber = undefined
+            }
           }
-          picked.orderNumber = `ORD-${String(maxNum + 1).padStart(3, '0')}`
 
-          const data = await prisma.order.create({ data: picked })
+          const data = await createOrderSafe(picked, { preferredNumber: picked.orderNumber })
           if (depositAmount > 0) {
             // Stamp the deposit with the order's original creation date so
             // revenue lands on the correct day, not the sync day.
@@ -918,6 +945,51 @@ const ORDER_FIELDS = ['orderNumber', 'customerId', 'prescriptionId', 'frameId', 
 const PAYMENT_FIELDS = ['orderId', 'amount', 'paymentMethod', 'paymentDate', 'receiptNumber', 'reference', 'description', 'type', 'userId'] as const
 const EXPENSE_FIELDS = ['description', 'amount', 'category', 'date', 'notes', 'userId'] as const
 
+// ─── Order numbering ───────────────────────────────────────────────────────────
+function parseOrderNum(orderNumber?: string | null): number {
+  const m = orderNumber?.match(/ORD-(\d+)/)
+  return m ? parseInt(m[1], 10) : 0
+}
+function formatOrderNumber(n: number): string {
+  return `ORD-${String(n).padStart(3, '0')}`
+}
+
+// Next order number for a user, considering BOTH the server and the local cache.
+// The local cache holds not-yet-synced offline orders, so consulting it keeps the
+// online and offline paths on a single shared sequence — they never hand out the
+// same number to two different orders.
+async function computeNextOrderNumber(userId: string): Promise<number> {
+  const serverOrders = await prisma.order.findMany({ where: { userId }, select: { orderNumber: true } })
+  let maxNum = 0
+  for (const o of serverOrders) maxNum = Math.max(maxNum, parseOrderNum(o.orderNumber))
+  try { maxNum = Math.max(maxNum, localCache.getMaxOrderNumber(userId)) } catch {}
+  return maxNum + 1
+}
+
+// Create an order with a guaranteed-unique orderNumber, even when an online
+// create races the background sync. If `preferredNumber` is supplied (an offline
+// order preserving the number the user already wrote on the job), we try it first
+// and only fall back to a fresh number if it genuinely collides with a DIFFERENT
+// existing order — so a number is never silently changed in the normal case, and
+// an order is never dropped or duplicated.
+async function createOrderSafe(
+  createData: any,
+  opts: { preferredNumber?: string | null; include?: any } = {}
+): Promise<any> {
+  const userId = createData.userId
+  let candidate = opts.preferredNumber || formatOrderNumber(await computeNextOrderNumber(userId))
+  for (let attempt = 0; ; attempt++) {
+    try {
+      createData.orderNumber = candidate
+      return await prisma.order.create({ data: createData, ...(opts.include ? { include: opts.include } : {}) })
+    } catch (err: any) {
+      // P2002 = unique([orderNumber, userId]) collision. Recompute and retry.
+      if (err?.code !== 'P2002' || attempt >= 25) throw err
+      candidate = formatOrderNumber(await computeNextOrderNumber(userId))
+    }
+  }
+}
+
 function isNetworkError(err: any): boolean {
   const msg = String(err?.message || '')
   return (
@@ -1301,29 +1373,16 @@ function registerIpcHandlers() {
   ipcMain.handle('orders:create', async (_e, orderData: any) => {
     try {
       requireDb()
-      const allOrders = await prisma.order.findMany({
-        where: { userId: orderData.userId },
-        select: { orderNumber: true },
-      })
-      let maxNum = 0
-      for (const o of allOrders) {
-        const match = o.orderNumber?.match(/ORD-(\d+)/)
-        if (match) {
-          const num = parseInt(match[1], 10)
-          if (num > maxNum) maxNum = num
-        }
-      }
-      orderData.orderNumber = `ORD-${String(maxNum + 1).padStart(3, '0')}`
-
       const { depositAmount, frameId, ...rest } = orderData
       const createData: any = { ...rest, depositAmount }
       delete createData.customer
       delete createData.prescription
       delete createData.frame
       delete createData.lensType
+      // Server assigns the number atomically (shared sequence with offline orders).
+      delete createData.orderNumber
 
-      const data = await prisma.order.create({
-        data: createData,
+      const data = await createOrderSafe(createData, {
         include: { customer: true, prescription: true, frame: true, lensType: true, vlRightEyeLensType: true, vlLeftEyeLensType: true, vpRightEyeLensType: true, vpLeftEyeLensType: true },
       })
 
@@ -1357,7 +1416,9 @@ function registerIpcHandlers() {
         if (!err._offlineFastPath) markDbUnreachable()
         orderData.userId = orderData.userId || currentUser?.id
         const data = localCache.createLocalOrder(orderData, orderData.userId)
-        syncManager.addToQueue('orders:create', { ...orderData, createdAt: data.createdAt, localId: data.id }, data.id, currentUser?.id)
+        // Carry the locally-assigned orderNumber into the queue so sync PRESERVES
+        // the number the user already wrote on the job, instead of reassigning one.
+        syncManager.addToQueue('orders:create', { ...orderData, orderNumber: data.orderNumber, createdAt: data.createdAt, localId: data.id }, data.id, currentUser?.id)
         return { data }
       }
       return { error: err.message }
