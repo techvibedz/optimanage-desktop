@@ -5,6 +5,7 @@ import { setLanguage, Language } from '@/lib/translations'
 import { toast } from 'sonner'
 import { Upload, X, Loader2, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react'
 import type { UpdaterStatus } from '@/types/electron'
+import SyncRepairCard from '@/components/SyncRepairCard'
 
 export default function SettingsPage() {
   const { t } = useTranslation()
@@ -220,6 +221,9 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
+
+      {/* Sync Repair */}
+      <SyncRepairCard />
     </div>
   )
 }

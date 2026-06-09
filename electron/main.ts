@@ -244,8 +244,126 @@ app.whenReady().then(() => {
   // ── Sync queue status for the renderer ─────────────────────────────────
   ipcMain.handle('sync:status', () => ({
     pendingItems: currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength(),
+    quarantinedItems: syncManager.getQuarantineLength(),
     isOnline: syncManager.isOnline(),
   }))
+
+  // ── Sync Repair: diagnose what is stuck and why ────────────────────────
+  // Returns pending + quarantined items in plain terms, plus, for any payment
+  // whose order link is broken, the offline order's details and candidate
+  // server orders so the user can relink it (see sync:relinkOrder).
+  ipcMain.handle('sync:diagnose', async () => {
+    try {
+      const uid = currentUser?.id
+      const all = [
+        ...syncManager.getQueue().map((i: any) => ({ ...i, _q: false })),
+        ...syncManager.getQuarantine().map((i: any) => ({ ...i, _q: true })),
+      ].filter(i => !i.userId || !uid || i.userId === uid)
+
+      const custName = (c: any) => c ? [c.firstName, c.lastName].filter(Boolean).join(' ').trim() : ''
+      const items: any[] = []
+      const unresolvedPayments: any[] = []
+
+      for (const it of all) {
+        const base = {
+          id: it.id, action: it.action, quarantined: it._q,
+          reason: it.reason || null, retries: it.retries || 0, createdAt: it.createdAt,
+        }
+        if (it.action === 'payments:create') {
+          const oid = it.payload?.orderId
+          const isLocal = typeof oid === 'string' && oid.startsWith('local_')
+          const mapping = isLocal ? localCache.getLocalIdMapping(oid) : null
+          const resolved = !isLocal || !!mapping
+          items.push({ ...base, kind: 'payment', amount: it.payload?.amount, resolved })
+          if (isLocal && !mapping) {
+            const lo = localCache.getLocalOrder(oid)
+            let candidates: any[] = []
+            let serverCustomerId: string | null = lo?.customerId || null
+            if (typeof serverCustomerId === 'string' && serverCustomerId.startsWith('local_')) {
+              serverCustomerId = localCache.getLocalIdMapping(serverCustomerId)
+            }
+            if (uid && isDbAvailable()) {
+              try {
+                // Prefer the order's own customer; if the local order row is gone
+                // (mapping lost AND record deleted), fall back to recent orders so
+                // the user can still pick the right one manually.
+                const where: any = serverCustomerId
+                  ? { userId: uid, customerId: serverCustomerId }
+                  : { userId: uid }
+                const rows = await prisma.order.findMany({
+                  where,
+                  select: { id: true, orderNumber: true, totalPrice: true, createdAt: true, customer: { select: { firstName: true, lastName: true } } },
+                  orderBy: { createdAt: 'desc' }, take: serverCustomerId ? 25 : 60,
+                })
+                candidates = rows.map((r: any) => ({ id: r.id, orderNumber: r.orderNumber, totalPrice: r.totalPrice, createdAt: r.createdAt, customerName: custName(r.customer) }))
+              } catch { /* offline — no candidates */ }
+            }
+            unresolvedPayments.push({
+              queueId: it.id, quarantined: it._q, amount: it.payload?.amount,
+              paymentMethod: it.payload?.paymentMethod, paymentDate: it.payload?.paymentDate,
+              localOrderId: oid,
+              localOrder: lo ? { orderNumber: lo.orderNumber, totalPrice: lo.totalPrice, createdAt: lo.createdAt, customerName: custName(lo.customer) } : null,
+              candidates,
+            })
+          }
+        } else if (it.action === 'orders:create') {
+          const linked = !!localCache.getLocalIdMapping(it.id)
+          items.push({ ...base, kind: 'order', orderNumber: it.payload?.orderNumber, resolved: linked })
+        } else {
+          items.push({ ...base, kind: it.action.split(':')[0], resolved: true })
+        }
+      }
+
+      return {
+        pendingItems: uid ? syncManager.getQueueLengthForUser(uid) : syncManager.getQueueLength(),
+        quarantinedItems: syncManager.getQuarantineLength(),
+        isOnline: syncManager.isOnline(),
+        items, unresolvedPayments,
+      }
+    } catch (err: any) {
+      return { error: err?.message || String(err) }
+    }
+  })
+
+  // ── Sync Repair: manually relink an offline order to its server order ───
+  // Writes the lost local_→server mapping the user confirmed, re-queues any
+  // quarantined items that referenced it, and kicks a sync pass. Never creates
+  // or edits an order — it only restores the link.
+  ipcMain.handle('sync:relinkOrder', async (_e, params: { localOrderId: string; serverOrderId: string }) => {
+    try {
+      const { localOrderId, serverOrderId } = params || ({} as any)
+      if (!localOrderId || !serverOrderId) return { error: 'Missing localOrderId or serverOrderId' }
+      if (isDbAvailable()) {
+        const exists = await prisma.order.findUnique({ where: { id: serverOrderId }, select: { id: true } })
+        if (!exists) return { error: 'Selected server order no longer exists' }
+      }
+      localCache.cacheLocalIdMapping(localOrderId, serverOrderId, 'order')
+      // Re-queue any quarantined items tied to this order (the order-create itself
+      // and any payments pointing at it) so they retry with the restored link.
+      let requeued = 0
+      for (const q of syncManager.getQuarantine()) {
+        if (q.id === localOrderId || (typeof q.payload?.orderId === 'string' && q.payload.orderId === localOrderId)) {
+          if (syncManager.requeueFromQuarantine(q.id)) requeued++
+        }
+      }
+      console.log(`[Sync] Relinked ${localOrderId} → ${serverOrderId}; re-queued ${requeued} quarantined item(s)`)
+      processSyncQueue()
+      return { success: true, requeued }
+    } catch (err: any) {
+      return { error: err?.message || String(err) }
+    }
+  })
+
+  // ── Sync Repair: force a sync pass now ─────────────────────────────────
+  ipcMain.handle('sync:retryNow', async () => {
+    // Move everything out of quarantine back into the live queue, then process.
+    let requeued = 0
+    for (const q of syncManager.getQuarantine()) {
+      if (syncManager.requeueFromQuarantine(q.id)) requeued++
+    }
+    processSyncQueue()
+    return { success: true, requeued }
+  })
 
   ipcMain.handle('sync:hydrate', async () => {
     const ok = await hydrateCurrentUserCache('manual-sync-hydrate', true)
@@ -407,6 +525,23 @@ app.whenReady().then(() => {
                 }
                 return existingByNumber
               }
+              // Number is taken by a DIFFERENT customer's order. Before assuming this
+              // is a brand-new order (and creating one under a fresh number), check
+              // whether THIS offline order already exists on the server under a
+              // changed number — otherwise the old renumber bug would make us create
+              // a duplicate. Adopt the twin if found.
+              const twin = await findServerOrderTwin({
+                userId: picked.userId, customerId: picked.customerId,
+                orderNumber: preferredNumber, totalPrice: picked.totalPrice, createdAt: picked.createdAt,
+              })
+              if (twin) {
+                console.log(`[Sync] Offline order matches existing server order ${twin.orderNumber} (${twin.id}) — adopting instead of duplicating`)
+                if (p.localId) {
+                  localCache.cacheLocalIdMapping(p.localId, twin.id, 'order')
+                  localCache.deleteLocalOrder(p.localId)
+                }
+                return twin
+              }
               console.warn(`[Sync] Order number ${preferredNumber} is taken by a different order — assigning a fresh number`)
               picked.orderNumber = undefined
             }
@@ -539,6 +674,13 @@ app.whenReady().then(() => {
         },
         'expenses:delete': (p) => prisma.expense.delete({ where: { id: p.id } }),
         'settings:update': (p) => prisma.setting.update({ where: { userId: p.userId }, data: p.updates }),
+      }
+      // Heal links that the old buggy sync lost: re-establish local_→server order
+      // mappings so orphaned offline payments can resolve their order. Conservative
+      // (only links on a confident match); never creates or edits an order.
+      if (currentUser?.id) {
+        try { await reconcileOrphanedOrderRefs(currentUser.id) }
+        catch (e: any) { console.warn('[Sync] Reconcile pass failed:', e?.message || e) }
       }
       syncManager.processQueue(handlers, localCache.getAllLocalIdMappings(), currentUser?.id).then((count) => {
         if (count > 0) {
@@ -988,6 +1130,84 @@ async function createOrderSafe(
       candidate = formatOrderNumber(await computeNextOrderNumber(userId))
     }
   }
+}
+
+// Find the server order that an OFFLINE order corresponds to, even if its
+// ORD-NNN number was changed under the old buggy sync (which is why a payment
+// can end up orphaned). Matches conservatively so we never link to the wrong
+// order: first by exact orderNumber, then by a strong natural key
+// (same customer + same total + same creation day). Returns a unique match or null.
+async function findServerOrderTwin(args: {
+  userId: string
+  customerId: string
+  orderNumber?: string | null
+  totalPrice?: number | null
+  createdAt?: string | Date | null
+}): Promise<{ id: string; orderNumber: string } | null> {
+  const { userId, customerId } = args
+  if (!userId || !customerId) return null
+  const candidates = await prisma.order.findMany({
+    where: { userId, customerId },
+    select: { id: true, orderNumber: true, totalPrice: true, createdAt: true },
+  })
+  if (candidates.length === 0) return null
+  // 1) Exact preserved number.
+  if (args.orderNumber) {
+    const exact = candidates.find((c: any) => c.orderNumber === args.orderNumber)
+    if (exact) return { id: exact.id, orderNumber: exact.orderNumber }
+  }
+  // 2) Renumbered order: same customer + same total + same creation day, and exactly one.
+  const total = Number(args.totalPrice ?? NaN)
+  const day = args.createdAt ? new Date(args.createdAt).toISOString().slice(0, 10) : null
+  if (!Number.isNaN(total) && day) {
+    const stable = candidates.filter((c: any) =>
+      Math.abs(Number(c.totalPrice ?? NaN) - total) < 0.01 &&
+      new Date(c.createdAt).toISOString().slice(0, 10) === day
+    )
+    if (stable.length === 1) return { id: stable[0].id, orderNumber: stable[0].orderNumber }
+  }
+  return null
+}
+
+// Scan the sync queue for offline orders (and orders referenced by queued
+// payments) whose local_→server mapping was lost under the old buggy sync, and
+// restore the mapping when we can confidently match the server twin. Once the
+// mapping exists, processQueue's persistedIdMap rewrites the payment's orderId
+// automatically, so the stuck payment finally syncs — without touching any order.
+async function reconcileOrphanedOrderRefs(userId: string): Promise<number> {
+  const queue = syncManager.getQueue().filter(i => !i.userId || i.userId === userId)
+  if (queue.length === 0) return 0
+  const localOrderIds = new Set<string>()
+  for (const it of queue) {
+    if (it.action === 'orders:create' && typeof it.id === 'string' && it.id.startsWith('local_')) localOrderIds.add(it.id)
+    const oid = it.payload?.orderId
+    if (typeof oid === 'string' && oid.startsWith('local_')) localOrderIds.add(oid)
+  }
+  let healed = 0
+  for (const localId of localOrderIds) {
+    if (localCache.getLocalIdMapping(localId)) continue // already linked
+    const lo = localCache.getLocalOrder(localId)
+    if (!lo) continue
+    // Resolve the order's customer to a server id (it may itself be a local_ ref).
+    let customerId: string | null = lo.customerId
+    if (typeof customerId === 'string' && customerId.startsWith('local_')) {
+      customerId = localCache.getLocalIdMapping(customerId)
+    }
+    if (!customerId) continue // customer not on server yet — let the normal flow run first
+    const twin = await findServerOrderTwin({
+      userId, customerId, orderNumber: lo.orderNumber,
+      totalPrice: lo.totalPrice, createdAt: lo.createdAt,
+    })
+    if (twin) {
+      localCache.cacheLocalIdMapping(localId, twin.id, 'order')
+      healed++
+      console.log(`[Sync] Reconciled offline order ${localId} → server ${twin.orderNumber} (${twin.id})`)
+    } else {
+      console.warn(`[Sync] Offline order ${localId} (ORD ${lo.orderNumber}) has no confident server match — needs manual relink`)
+    }
+  }
+  if (healed > 0) console.log(`[Sync] Reconcile healed ${healed} lost order link(s)`)
+  return healed
 }
 
 function isNetworkError(err: any): boolean {

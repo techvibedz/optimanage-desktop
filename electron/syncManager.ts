@@ -14,6 +14,9 @@ export interface QueueItem {
 
 // ─── Queue file path ─────────────────────────────────────────────────────────
 const getQueuePath = () => path.join(app.getPath('userData'), 'sync-queue.json')
+// Dead-letter file: items that exhausted their retries are MOVED here instead of
+// being dropped, so financial data (payments) is never silently lost.
+const getQuarantinePath = () => path.join(app.getPath('userData'), 'sync-quarantine.json')
 
 // ─── Read / Write helpers ────────────────────────────────────────────────────
 function readQueue(): QueueItem[] {
@@ -33,6 +36,69 @@ function writeQueue(queue: QueueItem[]): void {
   } catch (err) {
     console.error('[SyncManager] Failed to write queue:', err)
   }
+}
+
+// ─── Quarantine (dead-letter) helpers ────────────────────────────────────────
+export interface QuarantineItem extends QueueItem {
+  quarantinedAt: string
+  reason: string
+}
+
+function readQuarantine(): QuarantineItem[] {
+  try {
+    const filePath = getQuarantinePath()
+    if (!fs.existsSync(filePath)) return []
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+  } catch {
+    return []
+  }
+}
+
+function writeQuarantine(items: QuarantineItem[]): void {
+  try {
+    fs.writeFileSync(getQuarantinePath(), JSON.stringify(items, null, 2), 'utf-8')
+  } catch (err) {
+    console.error('[SyncManager] Failed to write quarantine:', err)
+  }
+}
+
+function quarantineItem(item: QueueItem, reason: string): void {
+  const items = readQuarantine()
+  if (items.some(q => q.id === item.id && q.action === item.action)) return
+  items.push({ ...item, quarantinedAt: new Date().toISOString(), reason })
+  writeQuarantine(items)
+  console.warn(`[SyncManager] ⚠ Quarantined ${item.action} (${item.id}) — ${reason}. Data preserved, NOT dropped.`)
+}
+
+export function getQuarantine(): QuarantineItem[] {
+  return readQuarantine()
+}
+
+export function getQuarantineLength(): number {
+  return readQuarantine().length
+}
+
+/** Move a quarantined item back into the live queue so it is retried (e.g. after a manual relink). */
+export function requeueFromQuarantine(localId: string): boolean {
+  const items = readQuarantine()
+  const idx = items.findIndex(q => q.id === localId)
+  if (idx === -1) return false
+  const [item] = items.splice(idx, 1)
+  writeQuarantine(items)
+  const queue = readQueue()
+  if (!queue.some(q => q.id === item.id && q.action === item.action)) {
+    const { quarantinedAt: _q, reason: _r, ...rest } = item as any
+    queue.push({ ...rest, retries: 0 })
+    writeQueue(queue)
+  }
+  console.log(`[SyncManager] Re-queued ${item.action} (${localId}) from quarantine`)
+  return true
+}
+
+export function removeFromQuarantine(localId: string): void {
+  const items = readQuarantine()
+  const filtered = items.filter(q => q.id !== localId)
+  if (filtered.length !== items.length) writeQuarantine(filtered)
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -71,6 +137,10 @@ export function addToQueue(action: string, payload: any, localId: string, userId
 
 export function getQueueLength(): number {
   return readQueue().length
+}
+
+export function getQueue(): QueueItem[] {
+  return readQueue()
 }
 
 export function removeFromQueue(localId: string): void {
@@ -219,7 +289,14 @@ export async function processQueue(
 
       item.retries++
       if (item.retries >= 20) {
-        console.error(`[SyncManager] ✗ Dropped ${item.action} (${item.id}) after 20 retries: ${msg}${err?.code ? ` [${err.code}]` : ''}`)
+        // Never silently drop create-type items — they carry user data (esp. payments = money).
+        // Move them to the quarantine dead-letter file so they can be inspected/recovered
+        // from the Sync Repair panel instead of vanishing.
+        if (item.action.endsWith(':create')) {
+          quarantineItem(item, `${msg.slice(0, 200)}${err?.code ? ` [${err.code}]` : ''}`)
+        } else {
+          console.error(`[SyncManager] ✗ Dropped ${item.action} (${item.id}) after 20 retries: ${msg}${err?.code ? ` [${err.code}]` : ''}`)
+        }
       } else {
         console.warn(`[SyncManager] ✗ Failed ${item.action} (${item.id}), retry ${item.retries}: ${msg}${err?.code ? ` [${err.code}]` : ''}`)
         remaining.push(item)

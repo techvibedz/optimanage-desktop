@@ -105,6 +105,9 @@ export interface ElectronAPI {
   // Sync
   getSyncStatus: () => Promise<SyncStatus>
   hydrateSyncCache: () => Promise<{ success: boolean; pendingItems: number; isOnline: boolean }>
+  diagnoseSync: () => Promise<SyncDiagnosis>
+  relinkSyncOrder: (params: { localOrderId: string; serverOrderId: string }) => Promise<{ success?: boolean; requeued?: number; error?: string }>
+  retrySyncNow: () => Promise<{ success: boolean; requeued: number }>
   onSyncStatus: (callback: (status: SyncStatus) => void) => () => void
 
   // Mobile Scanner Bridge (Expo companion)
@@ -124,6 +127,35 @@ export interface ElectronAPI {
 export interface SyncStatus {
   isOnline: boolean
   pendingItems: number
+  quarantinedItems?: number
+}
+
+export interface SyncOrderCandidate {
+  id: string
+  orderNumber: string
+  totalPrice: number | null
+  createdAt: string
+  customerName: string
+}
+
+export interface SyncUnresolvedPayment {
+  queueId: string
+  quarantined: boolean
+  amount: number
+  paymentMethod?: string
+  paymentDate?: string
+  localOrderId: string
+  localOrder: { orderNumber: string; totalPrice: number | null; createdAt: string; customerName: string } | null
+  candidates: SyncOrderCandidate[]
+}
+
+export interface SyncDiagnosis {
+  pendingItems: number
+  quarantinedItems: number
+  isOnline: boolean
+  items: Array<{ id: string; action: string; kind: string; quarantined: boolean; reason: string | null; retries: number; resolved: boolean; amount?: number; orderNumber?: string }>
+  unresolvedPayments: SyncUnresolvedPayment[]
+  error?: string
 }
 
 export interface MobileScannerInfo {
