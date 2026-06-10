@@ -99,6 +99,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   hydrateSyncCache: () => ipcRenderer.invoke('sync:hydrate'),
   diagnoseSync: () => ipcRenderer.invoke('sync:diagnose'),
   relinkSyncOrder: (params: { localOrderId: string; serverOrderId: string }) => ipcRenderer.invoke('sync:relinkOrder', params),
+  discardSyncItem: (params: { id: string; action?: string }) => ipcRenderer.invoke('sync:discardItem', params),
   retrySyncNow: () => ipcRenderer.invoke('sync:retryNow'),
   onSyncStatus: (callback: (status: { pendingItems: number; isOnline: boolean }) => void) => {
     const handler = (_event: any, status: { pendingItems: number; isOnline: boolean }) => callback(status)

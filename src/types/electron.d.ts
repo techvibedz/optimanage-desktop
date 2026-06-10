@@ -107,6 +107,7 @@ export interface ElectronAPI {
   hydrateSyncCache: () => Promise<{ success: boolean; pendingItems: number; isOnline: boolean }>
   diagnoseSync: () => Promise<SyncDiagnosis>
   relinkSyncOrder: (params: { localOrderId: string; serverOrderId: string }) => Promise<{ success?: boolean; requeued?: number; error?: string }>
+  discardSyncItem: (params: { id: string; action?: string }) => Promise<{ success?: boolean; removed?: number; error?: string }>
   retrySyncNow: () => Promise<{ success: boolean; requeued: number }>
   onSyncStatus: (callback: (status: SyncStatus) => void) => () => void
 

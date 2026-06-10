@@ -354,6 +354,24 @@ app.whenReady().then(() => {
     }
   })
 
+  // ── Sync Repair: manually discard a stuck item ─────────────────────────
+  // Removes a single stuck queue/quarantine item the user has confirmed is fine
+  // (record already on the server, or no longer needed). This is the deliberate
+  // escape hatch for items that stay stuck but don't actually need to sync —
+  // the renderer is responsible for confirming with the user first, and for
+  // warning loudly before discarding financial data (payments).
+  ipcMain.handle('sync:discardItem', async (_e, params: { id: string; action?: string }) => {
+    try {
+      const { id, action } = params || ({} as any)
+      if (!id) return { error: 'Missing id' }
+      const removed = syncManager.discardItem(id, action)
+      console.log(`[Sync] Manually discarded ${removed} stuck item(s) for ${id}${action ? ` (${action})` : ''}`)
+      return { success: true, removed }
+    } catch (err: any) {
+      return { error: err?.message || String(err) }
+    }
+  })
+
   // ── Sync Repair: force a sync pass now ─────────────────────────────────
   ipcMain.handle('sync:retryNow', async () => {
     // Move everything out of quarantine back into the live queue, then process.

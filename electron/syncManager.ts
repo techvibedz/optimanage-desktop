@@ -127,6 +127,32 @@ export function removeFromQuarantine(localId: string): void {
   if (filtered.length !== items.length) writeQuarantine(filtered)
 }
 
+/**
+ * Manually discard a stuck item from BOTH the live queue and the quarantine.
+ * Used by the Sync Repair panel when the user has confirmed the record is fine
+ * (already on the server / no longer needed) and just wants the stuck item gone.
+ * Matches on local id; an optional action narrows it to one specific queued op.
+ * Returns how many entries were removed across both files.
+ */
+export function discardItem(localId: string, action?: string): number {
+  let removed = 0
+  const matches = (i: { id: string; action: string }) =>
+    i.id === localId && (!action || i.action === action)
+
+  const queue = readQueue()
+  const keptQueue = queue.filter(i => !matches(i))
+  removed += queue.length - keptQueue.length
+  if (keptQueue.length !== queue.length) writeQueue(keptQueue)
+
+  const quarantine = readQuarantine()
+  const keptQ = quarantine.filter(i => !matches(i))
+  removed += quarantine.length - keptQ.length
+  if (keptQ.length !== quarantine.length) writeQuarantine(keptQ)
+
+  if (removed > 0) console.log(`[SyncManager] Discarded ${removed} item(s) for ${localId}${action ? ` (${action})` : ''}`)
+  return removed
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export function isOnline(): boolean {
