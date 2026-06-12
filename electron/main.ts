@@ -415,22 +415,25 @@ app.whenReady().then(() => {
     // even if any step throws. A leaked flag was the main cause of sync silently
     // wedging and "never syncing" until restart.
     try {
-      // Ensure Prisma connection is fresh after offline period
-      try { await prisma.$connect() } catch (e: any) {
+      // Ensure Prisma connection is fresh after offline period.
+      // Every pre-flight step is timeout-bounded: a half-open socket after an
+      // offline→online flip can make these hang indefinitely, which used to
+      // wedge the whole sync until the watchdog fired.
+      try { await syncManager.withTimeout(prisma.$connect(), 10_000, 'prisma.$connect') } catch (e: any) {
         console.warn('[Sync] Prisma reconnect failed, skipping sync:', e?.message)
         markDbUnreachable()
         return
       }
       // Verify DB is actually queryable with a lightweight check
       try {
-        await prisma.$queryRaw`SELECT 1`
+        await syncManager.withTimeout(prisma.$queryRaw`SELECT 1`, 10_000, 'db-probe')
         markDbReachable()
       } catch (e: any) {
         console.warn('[Sync] DB not queryable, skipping sync:', e?.message?.slice(0, 200))
         markDbUnreachable()
         return
       }
-      try { await repairSessionUserId() } catch (e: any) { console.warn('[Sync] repairSessionUserId failed (continuing):', e?.message || e) }
+      try { await syncManager.withTimeout(repairSessionUserId(), 15_000, 'repairSessionUserId') } catch (e: any) { console.warn('[Sync] repairSessionUserId failed (continuing):', e?.message || e) }
       if (!currentUser) return
       try { queueUnsyncedLocalRecords(currentUser.id) } catch (e: any) { console.warn('[Sync] queueUnsyncedLocalRecords failed (continuing):', e?.message || e) }
       if ((currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength()) === 0) return
@@ -735,7 +738,7 @@ app.whenReady().then(() => {
       // mappings so orphaned offline payments can resolve their order. Conservative
       // (only links on a confident match); never creates or edits an order.
       if (currentUser?.id) {
-        try { await reconcileOrphanedOrderRefs(currentUser.id) }
+        try { await syncManager.withTimeout(reconcileOrphanedOrderRefs(currentUser.id), 30_000, 'reconcileOrphanedOrderRefs') }
         catch (e: any) { console.warn('[Sync] Reconcile pass failed:', e?.message || e) }
       }
       const count = await syncManager.processQueue(handlers, localCache.getAllLocalIdMappings(), currentUser?.id)
@@ -743,7 +746,7 @@ app.whenReady().then(() => {
         console.log(`[Sync] Processed ${count} queued items — re-hydrating local cache`)
         if (currentUser) {
           try {
-            await localCache.hydrateCache(prisma, currentUser.id)
+            await syncManager.withTimeout(localCache.hydrateCache(prisma, currentUser.id), 120_000, 'post-sync hydrate')
             console.log('[Sync] Local cache re-hydrated after sync')
             mainWindow?.webContents.send('sync:status', {
               pendingItems: currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength(),

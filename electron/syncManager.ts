@@ -11,6 +11,7 @@ export interface QueueItem {
   retries: number
   userId?: string     // which user created this item — prevents cross-account sync
   nextRetryAt?: string // ISO time before which this item is skipped (exponential backoff)
+  transientRetries?: number // timeout/stall retries — backoff only, NEVER counts toward quarantine
 }
 
 // ─── Reliability tuning ────────────────────────────────────────────────────────
@@ -22,7 +23,7 @@ const HANDLER_TIMEOUT_MS = 25_000
 // Race a handler against a timeout. Rejects with a timeout error instead of
 // hanging forever. Idempotency guards (order number / receipt number lookups)
 // make a retry after a false-timeout safe.
-function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Handler timeout after ${ms}ms for ${label}`)), ms)
     p.then(
@@ -45,20 +46,41 @@ const getQueuePath = () => path.join(app.getPath('userData'), 'sync-queue.json')
 const getQuarantinePath = () => path.join(app.getPath('userData'), 'sync-quarantine.json')
 
 // ─── Read / Write helpers ────────────────────────────────────────────────────
-function readQueue(): QueueItem[] {
-  try {
-    const filePath = getQueuePath()
-    if (!fs.existsSync(filePath)) return []
-    const raw = fs.readFileSync(filePath, 'utf-8')
-    return JSON.parse(raw)
-  } catch {
-    return []
+// Crash-safe persistence: write to a .tmp file then rename into place, keeping
+// the previous version as .bak. A crash mid-write can no longer corrupt the
+// queue JSON — and even if the main file IS damaged, reads fall back to the
+// .tmp (newest complete write) then .bak (previous version) instead of
+// silently returning an empty queue and losing every pending item.
+function safeWriteJson(filePath: string, value: unknown): void {
+  const tmp = `${filePath}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf-8')
+  try { if (fs.existsSync(filePath)) fs.copyFileSync(filePath, `${filePath}.bak`) } catch { /* best effort */ }
+  fs.renameSync(tmp, filePath)
+}
+
+function safeReadJsonArray(filePath: string): any[] | null {
+  for (const candidate of [filePath, `${filePath}.tmp`, `${filePath}.bak`]) {
+    try {
+      if (!fs.existsSync(candidate)) continue
+      const parsed = JSON.parse(fs.readFileSync(candidate, 'utf-8'))
+      if (Array.isArray(parsed)) {
+        if (candidate !== filePath) {
+          console.warn(`[SyncManager] ⚠ Recovered ${path.basename(filePath)} from ${path.basename(candidate)} (${parsed.length} items)`)
+        }
+        return parsed
+      }
+    } catch { /* damaged — try next candidate */ }
   }
+  return null
+}
+
+function readQueue(): QueueItem[] {
+  return (safeReadJsonArray(getQueuePath()) as QueueItem[] | null) ?? []
 }
 
 function writeQueue(queue: QueueItem[]): void {
   try {
-    fs.writeFileSync(getQueuePath(), JSON.stringify(queue, null, 2), 'utf-8')
+    safeWriteJson(getQueuePath(), queue)
   } catch (err) {
     console.error('[SyncManager] Failed to write queue:', err)
   }
@@ -71,18 +93,12 @@ export interface QuarantineItem extends QueueItem {
 }
 
 function readQuarantine(): QuarantineItem[] {
-  try {
-    const filePath = getQuarantinePath()
-    if (!fs.existsSync(filePath)) return []
-    return JSON.parse(fs.readFileSync(filePath, 'utf-8'))
-  } catch {
-    return []
-  }
+  return (safeReadJsonArray(getQuarantinePath()) as QuarantineItem[] | null) ?? []
 }
 
 function writeQuarantine(items: QuarantineItem[]): void {
   try {
-    fs.writeFileSync(getQuarantinePath(), JSON.stringify(items, null, 2), 'utf-8')
+    safeWriteJson(getQuarantinePath(), items)
   } catch (err) {
     console.error('[SyncManager] Failed to write quarantine:', err)
   }
@@ -113,12 +129,53 @@ export function requeueFromQuarantine(localId: string): boolean {
   writeQuarantine(items)
   const queue = readQueue()
   if (!queue.some(q => q.id === item.id && q.action === item.action)) {
-    const { quarantinedAt: _q, reason: _r, ...rest } = item as any
+    const { quarantinedAt: _q, reason: _r, nextRetryAt: _n, transientRetries: _t, ...rest } = item as any
     queue.push({ ...rest, retries: 0 })
     writeQueue(queue)
   }
   console.log(`[SyncManager] Re-queued ${item.action} (${localId}) from quarantine`)
   return true
+}
+
+// FK fields that may carry unresolved local_ references in a queued payload.
+const LOCAL_FK_FIELDS = ['customerId', 'prescriptionId', 'orderId', 'frameId', 'lensTypeId',
+  'vlRightEyeLensTypeId', 'vlLeftEyeLensTypeId', 'vpRightEyeLensTypeId', 'vpLeftEyeLensTypeId',
+  'supplierId']
+
+// Reasons that describe a stalled connection rather than bad data. Items
+// quarantined for these (by older app versions) deserve another chance once
+// the connection is healthy again.
+function isTransientReason(reason: string | undefined): boolean {
+  const r = (reason || '').toLowerCase()
+  return r.includes('handler timeout') || r.includes("can't reach database server")
+    || r.includes('econnrefused') || r.includes('etimedout') || r.includes('enotfound')
+    || r.includes('p1001') || r.includes('p1002')
+    || r.includes('connection pool') || r.includes('socket')
+}
+
+/**
+ * Quarantine is no longer a dead end: automatically move items back into the
+ * live queue when whatever blocked them has healed —
+ *  • every local_ FK reference in the payload now has a known server mapping
+ *    (e.g. the parent order/customer synced later, or the user relinked it), or
+ *  • the quarantine reason was a transient connection stall, not bad data.
+ * Called at the start of every sync pass, so recovery needs no manual action.
+ */
+export function requeueResolvedQuarantine(idMap: Record<string, string>): number {
+  const items = readQuarantine()
+  if (items.length === 0) return 0
+  let revived = 0
+  for (const q of items) {
+    let revive = isTransientReason(q.reason)
+    if (!revive && q.action.endsWith(':create') && q.payload && typeof q.payload === 'object') {
+      const localRefs = LOCAL_FK_FIELDS.filter(f =>
+        typeof q.payload[f] === 'string' && q.payload[f].startsWith('local_'))
+      revive = localRefs.length > 0 && localRefs.every(f => !!idMap[q.payload[f]])
+    }
+    if (revive && requeueFromQuarantine(q.id)) revived++
+  }
+  if (revived > 0) console.log(`[SyncManager] ♻ Auto-revived ${revived} quarantined item(s) — blockers have healed`)
+  return revived
 }
 
 export function removeFromQuarantine(localId: string): void {
@@ -226,6 +283,34 @@ export function getQueueLengthForUser(userId: string): number {
   return readQueue().filter(item => !item.userId || item.userId === userId).length
 }
 
+const keyOf = (i: { id: string; action: string }) => `${i.action}|${i.id}`
+
+// Persist one item's outcome by reconciling against the LATEST queue file
+// instead of bulk-rewriting from a snapshot taken at the start of the run.
+// A sync run can last minutes; meanwhile the user keeps working and addToQueue /
+// removeFromQueue mutate the file. The old end-of-run snapshot write silently
+// DELETED items queued during the run (data loss → "never synced") and
+// RESURRECTED items removed during the run (retried forever → "stuck").
+//  • consumedKey: remove that item (synced / quarantined / intentionally dropped)
+//  • updatedItem: copy its retry/backoff bookkeeping onto the live entry
+//    (only bookkeeping — the live payload may be newer than our snapshot's)
+function commitItemOutcome(consumedKey: string | null, updatedItem?: QueueItem): void {
+  const latest = readQueue()
+  let changed = false
+  const next: QueueItem[] = []
+  for (const it of latest) {
+    const k = keyOf(it)
+    if (consumedKey && k === consumedKey) { changed = true; continue }
+    if (updatedItem && k === keyOf(updatedItem)) {
+      next.push({ ...it, retries: updatedItem.retries, transientRetries: updatedItem.transientRetries, nextRetryAt: updatedItem.nextRetryAt })
+      changed = true
+      continue
+    }
+    next.push(it)
+  }
+  if (changed) writeQueue(next)
+}
+
 export async function processQueue(
   handlers: Record<string, (payload: any) => Promise<any>>,
   persistedIdMap?: Record<string, string>,
@@ -236,26 +321,26 @@ export async function processQueue(
     return 0
   }
 
+  // Seed with persistent local→server mappings from prior sync cycles
+  const idMap: Record<string, string> = { ...(persistedIdMap || {}) }
+
+  // Give quarantined items whose blockers have healed another chance, BEFORE
+  // reading the queue so they are processed in this very pass.
+  try { requeueResolvedQuarantine(idMap) } catch (e: any) {
+    console.warn('[SyncManager] Quarantine revival failed (continuing):', e?.message || e)
+  }
+
   const allItems = readQueue()
   if (allItems.length === 0) return 0
 
-  // Split: only process items belonging to the current user (or untagged legacy items)
-  const queue: QueueItem[] = []
-  const otherUserItems: QueueItem[] = []
-  for (const item of allItems) {
-    if (currentUserId && item.userId && item.userId !== currentUserId) {
-      otherUserItems.push(item)
-    } else {
-      queue.push(item)
-    }
+  // Only process items belonging to the current user (or untagged legacy items).
+  // Other users' items stay untouched in the file — no rewrite needed.
+  const queue = allItems.filter(item => !(currentUserId && item.userId && item.userId !== currentUserId))
+  const skippedOthers = allItems.length - queue.length
+  if (skippedOthers > 0) {
+    console.log(`[SyncManager] Skipping ${skippedOthers} items belonging to other users`)
   }
-  if (otherUserItems.length > 0) {
-    console.log(`[SyncManager] Skipping ${otherUserItems.length} items belonging to other users`)
-  }
-  if (queue.length === 0) {
-    writeQueue(otherUserItems)
-    return 0
-  }
+  if (queue.length === 0) return 0
 
   // Sort queue: customers first, then prescriptions, then orders, then payments
   const priority: Record<string, number> = { 'customers:create': 0, 'prescriptions:create': 1, 'orders:create': 2, 'payments:create': 3 }
@@ -263,21 +348,20 @@ export async function processQueue(
 
   console.log(`[SyncManager] Processing ${queue.length} queued items...`)
   let processed = 0
-  const remaining: QueueItem[] = []
-  // Seed with persistent local→server mappings from prior sync cycles
-  const idMap: Record<string, string> = { ...(persistedIdMap || {}) }
 
   for (const item of queue) {
     const handler = handlers[item.action]
     if (!handler) {
-      console.warn(`[SyncManager] No handler for action: ${item.action}. Dropping item.`)
+      // Unknown action (e.g. queue written by a newer/older version). Quarantine
+      // instead of silently dropping — the data stays inspectable and recoverable.
+      quarantineItem(item, `No handler for action ${item.action}`)
+      commitItemOutcome(keyOf(item))
       continue
     }
 
     // Backoff: a recently-failed item waits before its next attempt so it doesn't
     // churn every 5s. It stays in the queue, just untouched until its time comes.
     if (item.nextRetryAt && new Date(item.nextRetryAt).getTime() > Date.now()) {
-      remaining.push(item)
       continue
     }
 
@@ -296,14 +380,15 @@ export async function processQueue(
 
     try {
       const result = await withTimeout(handler(item.payload), HANDLER_TIMEOUT_MS, `${item.action} (${item.id})`)
-      // A successful attempt clears any pending backoff.
-      delete item.nextRetryAt
       // Store the ID mapping if the handler returned a record with an id
       if (result?.id && item.id?.startsWith('local_')) {
         idMap[item.id] = result.id
         console.log(`[SyncManager] ID mapping: ${item.id} → ${result.id}`)
       }
       processed++
+      // Persist the success IMMEDIATELY — a crash later in the run can no longer
+      // bring this item back for a duplicate attempt.
+      commitItemOutcome(keyOf(item))
       console.log(`[SyncManager] ✓ Synced ${item.action} (${item.id})`)
     } catch (err: any) {
       const msg = String(err?.message || '')
@@ -312,15 +397,17 @@ export async function processQueue(
       if (isConnectionError || isTimeout) {
         // DB unreachable or stalling — stop this run to bound its duration, keep all
         // remaining items. A stalled item gets a backoff stamp so it doesn't lead the
-        // next run straight back into the same stall.
+        // next run straight back into the same stall. Crucially this uses the
+        // TRANSIENT counter: a slow connection must never push good data toward
+        // quarantine — only genuine data errors count toward that limit.
         if (isTimeout) {
-          item.retries++
-          item.nextRetryAt = new Date(Date.now() + backoffMs(item.retries)).toISOString()
-          console.warn(`[SyncManager] ⏱ ${item.action} (${item.id}) timed out (retry ${item.retries}). Aborting run, will retry later.`)
+          item.transientRetries = (item.transientRetries || 0) + 1
+          item.nextRetryAt = new Date(Date.now() + backoffMs(item.transientRetries)).toISOString()
+          commitItemOutcome(null, item)
+          console.warn(`[SyncManager] ⏱ ${item.action} (${item.id}) timed out (stall ${item.transientRetries}). Aborting run, will retry later.`)
         } else {
           console.warn(`[SyncManager] DB unreachable, aborting sync. Will retry later.`)
         }
-        remaining.push(item, ...queue.slice(queue.indexOf(item) + 1))
         break
       }
 
@@ -330,6 +417,7 @@ export async function processQueue(
         console.warn(`[SyncManager] ✗ Dropping ${item.action} (${item.id}) — unique constraint violation (record likely already exists):`)
         console.warn(`[SyncManager]   Error: ${msg.slice(0, 500)}${err?.code ? ` [${err.code}]` : ''}`)
         processed++
+        commitItemOutcome(keyOf(item))
         continue
       }
       const isFKError = lower.includes('foreign key constraint') || lower.includes('record to delete does not exist') || lower.includes('record to update not found') || lower.includes('required but not found') || err?.code === 'P2003' || err?.code === 'P2025'
@@ -339,17 +427,21 @@ export async function processQueue(
       const hasRealLocalReference = item.action.endsWith(':create') && (() => {
         const p = item.payload
         if (!p || typeof p !== 'object') return false
-        const fkFields = ['customerId', 'prescriptionId', 'orderId', 'frameId', 'lensTypeId',
-          'vlRightEyeLensTypeId', 'vlLeftEyeLensTypeId', 'vpRightEyeLensTypeId', 'vpLeftEyeLensTypeId',
-          'userId', 'supplierId']
+        const fkFields = [...LOCAL_FK_FIELDS, 'userId']
         return fkFields.some(f => typeof p[f] === 'string' && p[f].startsWith('local_'))
       })()
       const isUnresolvedLocalReference = hasRealLocalReference || lower.includes('unresolved local')
 
       if (isFKError && !isUnresolvedLocalReference) {
-        console.warn(`[SyncManager] ✗ Dropping ${item.action} (${item.id}) — FK violation with no local refs:`)
-        console.warn(`[SyncManager]   Error: ${msg.slice(0, 500)}${err?.code ? ` [${err.code}]` : ''}`)
-        console.warn(`[SyncManager]   Payload:`, JSON.stringify(item.payload).slice(0, 800))
+        if (item.action.endsWith(':create')) {
+          // Create-type items carry user data — quarantine, never drop.
+          quarantineItem(item, `FK violation: ${msg.slice(0, 200)}${err?.code ? ` [${err.code}]` : ''}`)
+        } else {
+          console.warn(`[SyncManager] ✗ Dropping ${item.action} (${item.id}) — FK violation with no local refs (target record gone):`)
+          console.warn(`[SyncManager]   Error: ${msg.slice(0, 500)}${err?.code ? ` [${err.code}]` : ''}`)
+          console.warn(`[SyncManager]   Payload:`, JSON.stringify(item.payload).slice(0, 800))
+        }
+        commitItemOutcome(keyOf(item))
         continue
       }
       if (isFKError) {
@@ -367,17 +459,17 @@ export async function processQueue(
         } else {
           console.error(`[SyncManager] ✗ Dropped ${item.action} (${item.id}) after 20 retries: ${msg}${err?.code ? ` [${err.code}]` : ''}`)
         }
+        commitItemOutcome(keyOf(item))
       } else {
         // Space out the next attempt instead of retrying every 5s.
         item.nextRetryAt = new Date(Date.now() + backoffMs(item.retries)).toISOString()
+        commitItemOutcome(null, item)
         const waitS = Math.round(backoffMs(item.retries) / 1000)
         console.warn(`[SyncManager] ✗ Failed ${item.action} (${item.id}), retry ${item.retries} in ~${waitS}s: ${msg}${err?.code ? ` [${err.code}]` : ''}`)
-        remaining.push(item)
       }
     }
   }
 
-  writeQueue([...otherUserItems, ...remaining])
-  console.log(`[SyncManager] Done. Processed: ${processed}, Remaining: ${remaining.length}, OtherUsers: ${otherUserItems.length}`)
+  console.log(`[SyncManager] Done. Processed: ${processed}, Queue now: ${readQueue().length}`)
   return processed
 }
