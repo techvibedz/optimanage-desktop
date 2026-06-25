@@ -35,7 +35,7 @@ export function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promis
 
 // Exponential backoff (capped) so a failing item doesn't hammer the DB every 5s.
 // retries 1→2s, 2→4s, 3→8s … capped at 5 minutes.
-function backoffMs(retries: number): number {
+export function backoffMs(retries: number): number {
   return Math.min(5 * 60_000, 1000 * Math.pow(2, Math.min(retries, 8)))
 }
 
@@ -145,7 +145,7 @@ const LOCAL_FK_FIELDS = ['customerId', 'prescriptionId', 'orderId', 'frameId', '
 // Reasons that describe a stalled connection rather than bad data. Items
 // quarantined for these (by older app versions) deserve another chance once
 // the connection is healthy again.
-function isTransientReason(reason: string | undefined): boolean {
+export function isTransientReason(reason: string | undefined): boolean {
   const r = (reason || '').toLowerCase()
   return r.includes('handler timeout') || r.includes("can't reach database server")
     || r.includes('econnrefused') || r.includes('etimedout') || r.includes('enotfound')
