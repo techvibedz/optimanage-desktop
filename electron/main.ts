@@ -1670,17 +1670,21 @@ function registerIpcHandlers() {
       })
 
       if (depositAmount && depositAmount > 0) {
-        await prisma.payment.create({
-          data: {
-            orderId: data.id,
-            amount: depositAmount,
-            paymentMethod: 'cash',
-            receiptNumber: `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-            reference: 'Initial deposit',
-            paymentDate: new Date(),
-            userId: orderData.userId,
-          },
-        })
+        const depositReceipt = `DEP-${data.id}`
+        const existingDeposit = await prisma.payment.findUnique({ where: { receiptNumber: depositReceipt }, select: { id: true } })
+        if (!existingDeposit) {
+          await prisma.payment.create({
+            data: {
+              orderId: data.id,
+              amount: depositAmount,
+              paymentMethod: 'cash',
+              receiptNumber: depositReceipt,
+              reference: 'Initial deposit',
+              paymentDate: new Date(),
+              userId: orderData.userId,
+            },
+          })
+        }
       }
 
       if (frameId) {
@@ -2213,21 +2217,23 @@ function registerIpcHandlers() {
       if (!payment.receiptNumber) {
         payment.receiptNumber = `RCT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       }
-      const data = await prisma.payment.create({ data: payment })
-      markDbReachable()
-
-      if (payment.orderId) {
-        const order = await prisma.order.findUnique({ where: { id: payment.orderId }, select: { balanceDue: true, depositAmount: true } })
-        if (order) {
-          await prisma.order.update({
-            where: { id: payment.orderId },
-            data: {
-              balanceDue: Math.max(0, (order.balanceDue || 0) - payment.amount),
-              depositAmount: (order.depositAmount || 0) + payment.amount,
-            },
-          })
+      const data = await prisma.$transaction(async (tx: any) => {
+        const created = await tx.payment.create({ data: payment })
+        if (payment.orderId) {
+          const order = await tx.order.findUnique({ where: { id: payment.orderId }, select: { balanceDue: true, depositAmount: true } })
+          if (order) {
+            await tx.order.update({
+              where: { id: payment.orderId },
+              data: {
+                balanceDue: Math.max(0, (order.balanceDue || 0) - payment.amount),
+                depositAmount: (order.depositAmount || 0) + payment.amount,
+              },
+            })
+          }
         }
-      }
+        return created
+      })
+      markDbReachable()
 
       localCache.cachePayment(data)
       return { data }
