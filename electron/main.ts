@@ -1125,6 +1125,17 @@ async function repairSessionUserId(): Promise<boolean> {
   }
 }
 
+// Throw if the logged-in user is not an admin. Account management (create/edit/
+// delete users) is the one privilege boundary enforced in the main process —
+// the renderer's role-based hiding is cosmetic and bypassable from devtools.
+function assertAdmin(): void {
+  if (currentUser?.role !== 'ADMIN') {
+    const err: any = new Error('Not authorized — administrator role required')
+    err._forbidden = true
+    throw err
+  }
+}
+
 /**
  * Whitelist: picks only the allowed fields from an input object.
  * Used by create/update handlers to strip unknown fields (id, createdAt,
@@ -2450,6 +2461,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('users:create', async (_e, userData: any) => {
     try {
+      assertAdmin()
       const hashedPassword = await bcrypt.hash(userData.password, 10)
       const data = await prisma.user.create({
         data: { email: userData.email, name: userData.name, password: hashedPassword, role: userData.role || 'ASSISTANT' },
@@ -2462,6 +2474,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('users:update', async (_e, id: string, updates: any) => {
     try {
+      assertAdmin()
       if (updates.password) updates.password = await bcrypt.hash(updates.password, 10)
       const data = await prisma.user.update({
         where: { id },
@@ -2473,7 +2486,7 @@ function registerIpcHandlers() {
   })
 
   ipcMain.handle('users:delete', async (_e, id: string) => {
-    try { await prisma.user.delete({ where: { id } }); return { success: true } }
+    try { assertAdmin(); await prisma.user.delete({ where: { id } }); return { success: true } }
     catch (err: any) { return { error: err.message } }
   })
 
