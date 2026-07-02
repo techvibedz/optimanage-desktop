@@ -234,3 +234,26 @@ describe('discardItem', () => {
     expect(sm.getQuarantine().length).toBe(0)
   })
 })
+
+describe('processQueue onProgress', () => {
+  it('reports (0,total) first, then increments per handled item — successes AND failures', async () => {
+    sm.addToQueue('orders:create', { total: 1 }, 'local_prog_ok')
+    sm.addToQueue('orders:create', { total: 2 }, 'local_prog_fail')
+
+    const calls: Array<[number, number]> = []
+    await sm.processQueue({
+      'orders:create': async (p: any) => {
+        if (p.total === 2) throw new Error('validation error: bad data')
+        return { id: 'srv_prog_ok' }
+      },
+    }, undefined, undefined, (done, total) => calls.push([done, total]))
+
+    expect(calls[0]).toEqual([0, 2])
+    expect(calls[calls.length - 1]).toEqual([2, 2])
+    // monotonically increasing done, constant total
+    for (let i = 1; i < calls.length; i++) {
+      expect(calls[i][0]).toBe(calls[i - 1][0] + 1)
+      expect(calls[i][1]).toBe(2)
+    }
+  })
+})

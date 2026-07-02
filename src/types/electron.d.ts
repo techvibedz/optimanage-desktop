@@ -129,6 +129,12 @@ export interface SyncStatus {
   isOnline: boolean
   pendingItems: number
   quarantinedItems?: number
+  /** True while a sync run is actively processing the queue. */
+  syncing?: boolean
+  /** Items handled so far in the current run (only present during a run). */
+  done?: number
+  /** Total items in the current run (only present during a run). */
+  total?: number
 }
 
 export interface SyncOrderCandidate {

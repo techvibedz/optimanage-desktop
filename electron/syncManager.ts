@@ -314,7 +314,12 @@ function commitItemOutcome(consumedKey: string | null, updatedItem?: QueueItem):
 export async function processQueue(
   handlers: Record<string, (payload: any) => Promise<any>>,
   persistedIdMap?: Record<string, string>,
-  currentUserId?: string
+  currentUserId?: string,
+  // Called with (done, total) before the first item and after each item is
+  // handled (synced, skipped, failed, quarantined). Drives the renderer's
+  // sync progress bar AND serves as the watchdog heartbeat: a long run that
+  // is still making per-item progress must never be treated as wedged.
+  onProgress?: (done: number, total: number) => void
 ): Promise<number> {
   if (!isOnline()) {
     console.log('[SyncManager] Still offline, skipping queue processing.')
@@ -348,29 +353,40 @@ export async function processQueue(
 
   console.log(`[SyncManager] Processing ${queue.length} queued items...`)
   let processed = 0
+  let done = 0
+  onProgress?.(0, queue.length)
 
   for (const item of queue) {
+    // eslint-disable-next-line no-loop-func
+    const step = () => { done++; onProgress?.(done, queue.length) }
     const handler = handlers[item.action]
     if (!handler) {
       // Unknown action (e.g. queue written by a newer/older version). Quarantine
       // instead of silently dropping — the data stays inspectable and recoverable.
       quarantineItem(item, `No handler for action ${item.action}`)
       commitItemOutcome(keyOf(item))
+      step()
       continue
     }
 
     // Backoff: a recently-failed item waits before its next attempt so it doesn't
     // churn every 5s. It stays in the queue, just untouched until its time comes.
     if (item.nextRetryAt && new Date(item.nextRetryAt).getTime() > Date.now()) {
+      step()
       continue
     }
 
-    // Replace any local_ references in the payload with their real synced IDs
-    if (Object.keys(idMap).length > 0) {
-      const payloadStr = JSON.stringify(item.payload)
+    // Replace any local_ references in the payload with their real synced IDs.
+    // Scan the payload for local_ tokens and look those up, instead of trying
+    // every known mapping against every payload — with thousands of persisted
+    // mappings the old way burned CPU on the main process for each item.
+    const payloadStr = JSON.stringify(item.payload)
+    const localTokens = payloadStr.match(/local_[A-Za-z0-9_]+/g)
+    if (localTokens) {
       let replaced = payloadStr
-      for (const [localId, realId] of Object.entries(idMap)) {
-        replaced = replaced.split(localId).join(realId)
+      for (const token of new Set(localTokens)) {
+        const realId = idMap[token]
+        if (realId) replaced = replaced.split(token).join(realId)
       }
       if (replaced !== payloadStr) {
         item.payload = JSON.parse(replaced)
@@ -389,6 +405,7 @@ export async function processQueue(
       // Persist the success IMMEDIATELY — a crash later in the run can no longer
       // bring this item back for a duplicate attempt.
       commitItemOutcome(keyOf(item))
+      step()
       console.log(`[SyncManager] ✓ Synced ${item.action} (${item.id})`)
     } catch (err: any) {
       const msg = String(err?.message || '')
@@ -418,6 +435,7 @@ export async function processQueue(
         console.warn(`[SyncManager]   Error: ${msg.slice(0, 500)}${err?.code ? ` [${err.code}]` : ''}`)
         processed++
         commitItemOutcome(keyOf(item))
+        step()
         continue
       }
       const isFKError = lower.includes('foreign key constraint') || lower.includes('record to delete does not exist') || lower.includes('record to update not found') || lower.includes('required but not found') || err?.code === 'P2003' || err?.code === 'P2025'
@@ -442,6 +460,7 @@ export async function processQueue(
           console.warn(`[SyncManager]   Payload:`, JSON.stringify(item.payload).slice(0, 800))
         }
         commitItemOutcome(keyOf(item))
+        step()
         continue
       }
       if (isFKError) {
@@ -467,6 +486,7 @@ export async function processQueue(
         const waitS = Math.round(backoffMs(item.retries) / 1000)
         console.warn(`[SyncManager] ✗ Failed ${item.action} (${item.id}), retry ${item.retries} in ~${waitS}s: ${msg}${err?.code ? ` [${err.code}]` : ''}`)
       }
+      step()
     }
   }
 

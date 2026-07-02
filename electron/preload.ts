@@ -101,8 +101,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   relinkSyncOrder: (params: { localOrderId: string; serverOrderId: string }) => ipcRenderer.invoke('sync:relinkOrder', params),
   discardSyncItem: (params: { id: string; action?: string }) => ipcRenderer.invoke('sync:discardItem', params),
   retrySyncNow: () => ipcRenderer.invoke('sync:retryNow'),
-  onSyncStatus: (callback: (status: { pendingItems: number; isOnline: boolean }) => void) => {
-    const handler = (_event: any, status: { pendingItems: number; isOnline: boolean }) => callback(status)
+  onSyncStatus: (callback: (status: { pendingItems: number; isOnline: boolean; syncing?: boolean; done?: number; total?: number }) => void) => {
+    const handler = (_event: any, status: { pendingItems: number; isOnline: boolean; syncing?: boolean; done?: number; total?: number }) => callback(status)
     ipcRenderer.on('sync:status', handler)
     return () => { ipcRenderer.removeListener('sync:status', handler) }
   },

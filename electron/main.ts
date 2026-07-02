@@ -246,6 +246,7 @@ app.whenReady().then(() => {
     pendingItems: currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength(),
     quarantinedItems: syncManager.getQuarantineLength(),
     isOnline: syncManager.isOnline(),
+    syncing: syncInProgress,
   }))
 
   // ── Sync Repair: diagnose what is stuck and why ────────────────────────
@@ -394,23 +395,54 @@ app.whenReady().then(() => {
 
   // When connectivity is restored, trigger sync processing
   let syncInProgress = false
-  let syncStartedAt = 0
-  // Safety net: if a run somehow never releases the in-progress flag (an
-  // unforeseen hang outside the per-item timeout), this watchdog reclaims it so
-  // sync can never wedge permanently until the app restarts.
+  // Heartbeat, refreshed at run start AND after every processed item. The
+  // watchdog fires only when a run makes NO per-item progress for the whole
+  // window — a long queue legitimately taking minutes must never be declared
+  // stuck (the old start-time check did exactly that, and the "recovered"
+  // flag let a SECOND concurrent run race the first one → duplicate records).
+  let syncHeartbeatAt = 0
+  let lastLocalScanAt = 0
+  let lastQuarantinePassAt = 0
   const SYNC_WATCHDOG_MS = 180_000
+
+  // Push queue/progress state to the renderer's sync banner.
+  const sendSyncStatus = (s: { pendingItems: number; syncing: boolean; done?: number; total?: number }) => {
+    mainWindow?.webContents.send('sync:status', { isOnline: syncManager.isOnline(), ...s })
+  }
+
   async function processSyncQueue() {
     if (syncInProgress) {
-      if (syncStartedAt && Date.now() - syncStartedAt > SYNC_WATCHDOG_MS) {
-        console.warn(`[Sync] Watchdog: a run has been stuck for ${Math.round((Date.now() - syncStartedAt) / 1000)}s — forcing recovery`)
+      if (syncHeartbeatAt && Date.now() - syncHeartbeatAt > SYNC_WATCHDOG_MS) {
+        console.warn(`[Sync] Watchdog: a run made no progress for ${Math.round((Date.now() - syncHeartbeatAt) / 1000)}s — forcing recovery`)
         syncInProgress = false
       } else {
         return
       }
     }
     if (!isDbAvailable()) return
+    if (!currentUser) return
+    // Safety net that re-queues unsynced local_ rows. Pure SQLite, but it's 8
+    // table scans — throttled instead of running on every 5s tick. Failed
+    // online writes still enter the queue instantly via addToQueue.
+    if (Date.now() - lastLocalScanAt > 60_000) {
+      lastLocalScanAt = Date.now()
+      try { queueUnsyncedLocalRecords(currentUser.id) } catch (e: any) { console.warn('[Sync] queueUnsyncedLocalRecords failed (continuing):', e?.message || e) }
+    }
+    // Nothing to sync → not a single DB roundtrip. The old flow probed the DB
+    // and re-verified the session every 5 seconds even with an empty queue,
+    // which kept the app busy (and laggy) the entire time it was online.
+    if (syncManager.getQueueLengthForUser(currentUser.id) === 0) {
+      // Quarantined items may have healed (their parent record synced, or the
+      // stall passed) — give them a revival pass, but only every 5 minutes:
+      // items stuck on genuine data errors must not re-trigger the full
+      // pre-flight on every 5s tick.
+      if (syncManager.getQuarantineLength() === 0) return
+      if (Date.now() - lastQuarantinePassAt < 5 * 60_000) return
+      lastQuarantinePassAt = Date.now()
+    }
     syncInProgress = true
-    syncStartedAt = Date.now()
+    syncHeartbeatAt = Date.now()
+    let announcedProgress = false
     // The whole body runs inside try/finally so the flag is ALWAYS released —
     // even if any step throws. A leaked flag was the main cause of sync silently
     // wedging and "never syncing" until restart.
@@ -435,26 +467,37 @@ app.whenReady().then(() => {
       }
       try { await syncManager.withTimeout(repairSessionUserId(), 15_000, 'repairSessionUserId') } catch (e: any) { console.warn('[Sync] repairSessionUserId failed (continuing):', e?.message || e) }
       if (!currentUser) return
-      try { queueUnsyncedLocalRecords(currentUser.id) } catch (e: any) { console.warn('[Sync] queueUnsyncedLocalRecords failed (continuing):', e?.message || e) }
-      if ((currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength()) === 0) return
+      // Resolve the server-side userId ONCE per run. The handlers used to do a
+      // prisma.user.findUnique for EVERY queued customer/order — one extra DB
+      // roundtrip per item, for a value that cannot change mid-run.
+      let runUserId: string = currentUser.id
+      if (currentUser.email) {
+        try {
+          const serverUser: { id: string } | null = await syncManager.withTimeout(
+            prisma.user.findUnique({ where: { email: currentUser.email }, select: { id: true } }),
+            10_000, 'run userId lookup')
+          if (serverUser) runUserId = serverUser.id
+          else console.warn(`[Sync] No server user found for email ${currentUser.email}`)
+        } catch (e: any) {
+          console.warn(`[Sync] userId lookup failed (using session id): ${e?.message || e}`)
+        }
+      }
       const handlers: Record<string, (payload: any) => Promise<any>> = {
         'customers:create': async (p) => {
-          // Resolve userId from server — try multiple strategies
-          let resolvedUserId: string | null = null
-          if (currentUser?.email) {
-            try {
-              const serverUser = await prisma.user.findUnique({ where: { email: currentUser.email }, select: { id: true } })
-              if (serverUser) resolvedUserId = serverUser.id
-              else console.warn(`[Sync] No server user found for email ${currentUser.email}`)
-            } catch (e: any) {
-              console.warn(`[Sync] userId lookup failed: ${e?.message || e}`)
+          const resolvedUserId = runUserId || p.userId
+          if (!resolvedUserId) throw new Error('No userId resolved — cannot sync customer')
+
+          // Idempotency: if a prior attempt already synced this customer
+          // (crash or false timeout after the insert landed), adopt instead of
+          // creating a duplicate.
+          if (p.localId) {
+            const alreadySynced = localCache.getLocalIdMapping(p.localId)
+            if (alreadySynced) {
+              console.log(`[Sync] Customer ${p.localId} already synced → ${alreadySynced}, skipping`)
+              localCache.deleteSyncedLocalCustomer(p.localId)
+              return { id: alreadySynced }
             }
           }
-          // Fallback: use currentUser.id (repaired by repairSessionUserId earlier)
-          if (!resolvedUserId && currentUser?.id) resolvedUserId = currentUser.id
-          // Last resort: queued value
-          if (!resolvedUserId) resolvedUserId = p.userId
-          if (!resolvedUserId) throw new Error('No userId resolved — cannot sync customer')
 
           const fields: any = pickFields(p, CUSTOMER_FIELDS)
           fields.userId = resolvedUserId
@@ -463,8 +506,31 @@ app.whenReady().then(() => {
           if (p.createdAt) fields.createdAt = new Date(p.createdAt)
           // Strip any stale date strings that Prisma might reject
           if (fields.dateOfBirth === '' || fields.dateOfBirth === 'null') delete fields.dateOfBirth
-          console.log('[Sync] Creating customer with userId:', fields.userId, 'sessionId:', currentUser?.id, 'queuedId:', p.userId)
+
+          // Server twin check: the insert may have landed on a previous attempt
+          // whose response was lost (timeout), leaving no local mapping. Same
+          // name + same millisecond-precision offline creation time = this
+          // exact record — adopt it, never insert a second copy.
+          if (p.createdAt) {
+            const twin = await prisma.customer.findFirst({
+              where: { userId: resolvedUserId, firstName: fields.firstName, lastName: fields.lastName, createdAt: new Date(p.createdAt) },
+            })
+            if (twin) {
+              console.log(`[Sync] Customer already on server (${twin.id}), adopting instead of duplicating`)
+              localCache.cacheCustomer(twin)
+              if (p.localId) {
+                localCache.cacheLocalIdMapping(p.localId, twin.id, 'customer')
+                localCache.deleteSyncedLocalCustomer(p.localId)
+              }
+              return twin
+            }
+          }
+
+          console.log('[Sync] Creating customer with userId:', fields.userId)
           const data = await prisma.customer.create({ data: fields })
+          // Cache the synced record right away so offline reads keep working
+          // without waiting for a full re-hydrate.
+          localCache.cacheCustomer(data)
           if (p.localId) {
             localCache.cacheLocalIdMapping(p.localId, data.id, 'customer')
             localCache.deleteSyncedLocalCustomer(p.localId)
@@ -490,19 +556,7 @@ app.whenReady().then(() => {
           // @default(now()) stamps the sync day instead of the creation day,
           // making orders created offline appear on the day they synced.
           if (p.createdAt) picked.createdAt = new Date(p.createdAt)
-          // Resolve userId from server with fallback chain
-          let resolvedUserId: string | null = null
-          if (currentUser?.email) {
-            try {
-              const serverUser = await prisma.user.findUnique({ where: { email: currentUser.email }, select: { id: true } })
-              if (serverUser) resolvedUserId = serverUser.id
-              else console.warn(`[Sync] No server user found for email ${currentUser.email}`)
-            } catch (e: any) {
-              console.warn(`[Sync] userId lookup failed for order: ${e?.message || e}`)
-            }
-          }
-          if (!resolvedUserId && currentUser?.id) resolvedUserId = currentUser.id
-          if (!resolvedUserId) resolvedUserId = picked.userId
+          const resolvedUserId = runUserId || picked.userId
           if (!resolvedUserId) throw new Error('No userId resolved — cannot sync order')
           picked.userId = resolvedUserId
           if (typeof picked.customerId === 'string' && picked.customerId.startsWith('local_')) {
@@ -527,6 +581,7 @@ app.whenReady().then(() => {
               if (localRx.createdAt) rxFields.createdAt = new Date(localRx.createdAt)
               console.log(`[Sync] Inline-syncing prescription ${picked.prescriptionId} for order`)
               const rxResult = await prisma.prescription.create({ data: rxFields })
+              localCache.cachePrescription(rxResult)
               localCache.cacheLocalIdMapping(picked.prescriptionId, rxResult.id, 'prescription')
               picked.prescriptionId = rxResult.id
             } else {
@@ -583,6 +638,9 @@ app.whenReady().then(() => {
           }
 
           const data = await createOrderSafe(picked, { preferredNumber: picked.orderNumber })
+          // Cache the synced order immediately — offline reads must not depend
+          // on the (now throttled) full re-hydrate.
+          localCache.cacheOrder(data)
           if (depositAmount > 0) {
             // Stamp the deposit with the order's original creation date so
             // revenue lands on the correct day, not the sync day.
@@ -593,9 +651,10 @@ app.whenReady().then(() => {
             const depositReceipt = `DEP-${data.id}`
             const existingDeposit = await prisma.payment.findUnique({ where: { receiptNumber: depositReceipt }, select: { id: true } })
             if (!existingDeposit) {
-              await prisma.payment.create({
+              const deposit = await prisma.payment.create({
                 data: { orderId: data.id, amount: depositAmount, paymentMethod: 'cash', receiptNumber: depositReceipt, reference: 'Initial deposit', paymentDate: depositDate, createdAt: depositDate, userId: picked.userId }
               })
+              localCache.cachePayment(deposit)
             }
           }
           if (frameId) {
@@ -623,6 +682,15 @@ app.whenReady().then(() => {
         },
         'orders:delete': (p) => prisma.order.delete({ where: { id: p.id } }),
         'prescriptions:create': async (p) => {
+          // Idempotency: adopt a previously-synced copy instead of duplicating.
+          if (p.localId) {
+            const alreadySynced = localCache.getLocalIdMapping(p.localId)
+            if (alreadySynced) {
+              console.log(`[Sync] Prescription ${p.localId} already synced → ${alreadySynced}, skipping`)
+              localCache.deleteSyncedLocalPrescription(p.localId)
+              return { id: alreadySynced }
+            }
+          }
           if (typeof p.customerId === 'string' && p.customerId.startsWith('local_')) {
             const mappedCustomerId = localCache.getLocalIdMapping(p.customerId)
             if (mappedCustomerId) p.customerId = mappedCustomerId
@@ -630,7 +698,24 @@ app.whenReady().then(() => {
           if (typeof p.customerId === 'string' && p.customerId.startsWith('local_')) throw new Error(`Unresolved local customer reference: ${p.customerId}`)
           const rxData: any = pickFields(p, PRESCRIPTION_FIELDS)
           if (p.createdAt) rxData.createdAt = new Date(p.createdAt)
+          // Server twin check: same customer + same millisecond-precision offline
+          // creation time = this exact record from a lost-response retry.
+          if (p.createdAt && rxData.customerId) {
+            const twin = await prisma.prescription.findFirst({
+              where: { customerId: rxData.customerId, createdAt: new Date(p.createdAt) },
+            })
+            if (twin) {
+              console.log(`[Sync] Prescription already on server (${twin.id}), adopting instead of duplicating`)
+              localCache.cachePrescription(twin)
+              if (p.localId) {
+                localCache.cacheLocalIdMapping(p.localId, twin.id, 'prescription')
+                localCache.deleteSyncedLocalPrescription(p.localId)
+              }
+              return twin
+            }
+          }
           const data = await prisma.prescription.create({ data: rxData })
+          localCache.cachePrescription(data)
           if (p.localId) {
             localCache.cacheLocalIdMapping(p.localId, data.id, 'prescription')
             localCache.deleteSyncedLocalPrescription(p.localId)
@@ -645,6 +730,7 @@ app.whenReady().then(() => {
             p.userId = currentUser.id
           }
           const data = await prisma.frame.create({ data: pickFields(p, FRAME_FIELDS) as any })
+          localCache.cacheFrame(data)
           if (p.localId) localCache.deleteLocalFrame(p.localId)
           return data
         },
@@ -656,6 +742,7 @@ app.whenReady().then(() => {
             p.userId = currentUser.id
           }
           const data = await prisma.lensType.create({ data: pickFields(p, LENS_TYPE_FIELDS) as any })
+          localCache.cacheLensType(data)
           if (p.localId) localCache.deleteLocalLensType(p.localId)
           return data
         },
@@ -667,6 +754,7 @@ app.whenReady().then(() => {
             p.userId = currentUser.id
           }
           const data = await prisma.contactLens.create({ data: pickFields(p, CONTACT_LENS_FIELDS) as any })
+          localCache.cacheContactLens(data)
           if (p.localId) localCache.deleteLocalContactLens(p.localId)
           return data
         },
@@ -699,16 +787,21 @@ app.whenReady().then(() => {
           }
           // Insert the payment and adjust the order balance atomically, so a retry
           // can never leave a payment recorded without its balance update (or vice-versa).
+          let updatedOrder: any = null
           const data = await prisma.$transaction(async (tx: any) => {
             const created = await tx.payment.create({ data: picked })
             if (picked.orderId) {
               const order = await tx.order.findUnique({ where: { id: picked.orderId }, select: { balanceDue: true, depositAmount: true } })
               if (order) {
-                await tx.order.update({ where: { id: picked.orderId }, data: { balanceDue: Math.max(0, (order.balanceDue || 0) - picked.amount), depositAmount: (order.depositAmount || 0) + picked.amount } })
+                updatedOrder = await tx.order.update({ where: { id: picked.orderId }, data: { balanceDue: Math.max(0, (order.balanceDue || 0) - picked.amount), depositAmount: (order.depositAmount || 0) + picked.amount } })
               }
             }
             return created
           })
+          // Keep the local cache consistent without a full re-hydrate: the
+          // payment row AND the order's new balance.
+          localCache.cachePayment(data)
+          if (updatedOrder) localCache.cacheOrder(updatedOrder)
           if (p.localId) localCache.deleteLocalPayment(p.localId)
           return data
         },
@@ -721,6 +814,19 @@ app.whenReady().then(() => {
           const fields: any = pickFields(p, EXPENSE_FIELDS)
           if (fields.date && typeof fields.date === 'string') fields.date = new Date(fields.date)
           if (p.createdAt) fields.createdAt = new Date(p.createdAt)
+          // Server twin check: same user + amount + millisecond-precision offline
+          // creation time = a lost-response retry — adopt, don't duplicate.
+          if (p.createdAt && fields.userId) {
+            const twin = await prisma.expense.findFirst({
+              where: { userId: fields.userId, amount: fields.amount, createdAt: new Date(p.createdAt) },
+            })
+            if (twin) {
+              console.log(`[Sync] Expense already on server (${twin.id}), adopting instead of duplicating`)
+              if (p.localId) localCache.deleteLocalExpense(p.localId)
+              localCache.cacheExpense(twin)
+              return twin
+            }
+          }
           const data = await prisma.expense.create({ data: fields })
           if (p.localId) localCache.deleteLocalExpense(p.localId)
           localCache.cacheExpense(data)
@@ -741,31 +847,33 @@ app.whenReady().then(() => {
         try { await syncManager.withTimeout(reconcileOrphanedOrderRefs(currentUser.id), 30_000, 'reconcileOrphanedOrderRefs') }
         catch (e: any) { console.warn('[Sync] Reconcile pass failed:', e?.message || e) }
       }
-      const count = await syncManager.processQueue(handlers, localCache.getAllLocalIdMappings(), currentUser?.id)
+      const count = await syncManager.processQueue(handlers, localCache.getAllLocalIdMappings(), currentUser?.id,
+        (done, total) => {
+          // Heartbeat (keeps the watchdog honest) + live progress for the banner.
+          syncHeartbeatAt = Date.now()
+          announcedProgress = true
+          sendSyncStatus({ pendingItems: Math.max(0, total - done), syncing: done < total, done, total })
+        })
       if (count > 0) {
-        console.log(`[Sync] Processed ${count} queued items — re-hydrating local cache`)
-        if (currentUser) {
-          try {
-            await syncManager.withTimeout(localCache.hydrateCache(prisma, currentUser.id), 120_000, 'post-sync hydrate')
-            console.log('[Sync] Local cache re-hydrated after sync')
-            mainWindow?.webContents.send('sync:status', {
-              pendingItems: currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength(),
-              isOnline: true,
-            })
-          } catch (err: any) {
-            console.warn('[Sync] Re-hydrate after sync failed:', err?.message || err)
-          }
-        } else {
-          mainWindow?.webContents.send('sync:status', {
-            pendingItems: syncManager.getQueueLength(),
-            isOnline: true,
-          })
-        }
+        console.log(`[Sync] Processed ${count} queued items`)
+        // Handlers cache every synced record locally as they go, so the full
+        // re-hydrate is only background reconciliation now. It used to run
+        // unconditionally after EVERY pass (full data re-download + cache
+        // rewrite on the main process) — the main cause of the app freezing
+        // during sync. hydrateCurrentUserCache throttles to one run per 30s.
+        hydrateCurrentUserCache('post-sync').catch(() => {})
       }
     } catch (err: any) {
       console.warn('[Sync] Queue processing failed:', err?.message || err)
     } finally {
       syncInProgress = false
+      // Close out the banner with the real remaining count (run may have aborted early).
+      if (announcedProgress) {
+        sendSyncStatus({
+          pendingItems: currentUser?.id ? syncManager.getQueueLengthForUser(currentUser.id) : syncManager.getQueueLength(),
+          syncing: false,
+        })
+      }
     }
   }
   setInterval(processSyncQueue, 5000)

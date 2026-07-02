@@ -431,19 +431,28 @@ export async function hydrateCache(prisma: any, userId: string) {
       prisma.expense.findMany({ where: { userId } }),
     ])
 
+    // Write in small transactions and yield to the event loop between them.
+    // One giant synchronous transaction over the whole dataset blocked the
+    // Electron main process (and with it every IPC call → the whole UI) for
+    // the duration of the rewrite.
     const d = getDb()
-    const tx = d.transaction(() => {
-      for (const c of customers) cacheCustomer(c)
-      for (const o of orders) cacheOrder(o)
-      for (const p of payments) cachePayment(p)
-      for (const rx of prescriptions) cachePrescription(rx)
-      for (const f of frames) cacheFrame(f)
-      for (const lt of lensTypes) cacheLensType(lt)
-      for (const cl of contactLenses) cacheContactLens(cl)
-      for (const s of settings) cacheSetting(s)
-      for (const e of expenses) cacheExpense(e)
-    })
-    tx()
+    const CHUNK = 200
+    const writeChunked = async (rows: any[], cacheFn: (row: any) => void) => {
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const chunk = rows.slice(i, i + CHUNK)
+        d.transaction(() => { for (const row of chunk) cacheFn(row) })()
+        if (i + CHUNK < rows.length) await new Promise<void>(resolve => setImmediate(resolve))
+      }
+    }
+    await writeChunked(customers, cacheCustomer)
+    await writeChunked(orders, cacheOrder)
+    await writeChunked(payments, cachePayment)
+    await writeChunked(prescriptions, cachePrescription)
+    await writeChunked(frames, cacheFrame)
+    await writeChunked(lensTypes, cacheLensType)
+    await writeChunked(contactLenses, cacheContactLens)
+    await writeChunked(settings, cacheSetting)
+    await writeChunked(expenses, cacheExpense)
 
     console.log(`[LocalCache] Hydrated: ${customers.length} customers, ${orders.length} orders, ${payments.length} payments, ${prescriptions.length} prescriptions, ${frames.length} frames, ${lensTypes.length} lensTypes, ${contactLenses.length} contactLenses`)
   } catch (err: any) {
