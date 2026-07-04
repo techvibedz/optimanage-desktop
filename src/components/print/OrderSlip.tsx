@@ -309,32 +309,27 @@ export default function OrderSlip({ order }: OrderSlipProps) {
     const contentRef = useRef<HTMLDivElement>(null)
     const [scale, setScale] = useState(1)
 
-    // Auto-fit: measure natural (unscaled) content height, then upscale
-    // to fill the half-page. Scale is capped at MAX_UPSCALE to keep the
-    // horizontal CSS width (100/scale%) wide enough for absolute mm/pt
-    // content (e.g. ORD-1847 at 15pt in a 30mm cell, optician name in
-    // its flex column). Above that cap, content stops growing and a
-    // small whitespace gap may remain before the footer — preferable to
-    // horizontal overflow that clips text.
+    // Auto-fit: measure natural (unzoomed) content height, then upscale
+    // to fill the half-page. Scale is capped at MAX_UPSCALE — since zoom
+    // scales width too, over-zooming would push absolute mm/pt content
+    // (e.g. ORD-1847 at 15pt in a 30mm cell) past the page edge and clip
+    // it. Above the cap, content stops growing and a small whitespace gap
+    // may remain after the footer — preferable to horizontal overflow.
     const MAX_UPSCALE = 1.3
     useLayoutEffect(() => {
       const measure = () => {
         const c = containerRef.current
         const inner = contentRef.current
         if (!c || !inner) return
-        // Snapshot styles, reset to natural (no transform, full width,
-        // intrinsic height) so offsetHeight reads the unscaled content
-        // size, then restore.
-        const prevTransform = inner.style.transform
-        const prevWidth = inner.style.width
+        // Snapshot styles, reset to natural (zoom 1, intrinsic height) so
+        // offsetHeight reads the unzoomed content size, then restore.
+        const prevZoom = inner.style.zoom
         const prevHeight = inner.style.height
-        inner.style.transform = 'none'
-        inner.style.width = '100%'
+        inner.style.zoom = '1'
         inner.style.height = 'auto'
         const cH = c.offsetHeight
         const tH = inner.offsetHeight
-        inner.style.transform = prevTransform
-        inner.style.width = prevWidth
+        inner.style.zoom = prevZoom
         inner.style.height = prevHeight
         if (tH > 0) {
           const ratio = cH / tH
@@ -353,10 +348,14 @@ export default function OrderSlip({ order }: OrderSlipProps) {
         <div ref={contentRef} style={{
           padding: `${fs('1.5mm', '2mm', '2.5mm')} ${px}`,
           boxSizing: 'border-box',
-          transformOrigin: 'top left',
-          transform: `scale(${scale})`,
-          width: `${100 / scale}%`,
-          height: `${100 / scale}%`,
+          // ponytail: zoom, NOT transform:scale. transform:scale creates a
+          // composited layer that Chromium rasterizes into a full bitmap at
+          // print time — slow to spool on low-end PCs even after dropping the
+          // print DPI. zoom participates in layout, so text and the barcode
+          // stay vector and print fast; on-screen auto-fit is identical,
+          // including the downscale (ratio<1) path.
+          zoom: scale,
+          width: '100%',
           display: 'flex',
           flexDirection: 'column',
         }}>
