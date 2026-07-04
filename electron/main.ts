@@ -1122,7 +1122,13 @@ ipcMain.handle('print:slip', async () => {
       printBackground: true,
       pageSize: { width: 148000, height: 210000 }, // A5 in microns
       margins: { marginType: 'none' },
-      dpi: { horizontal: 300, vertical: 300 },
+      // ponytail: no dpi override. 300 dpi forces Chromium to rasterize every
+      // non-vector bit (the base64 logo — rendered twice on the slip — and the
+      // transform:scale half-pages) into a ~4.3M-px/page bitmap, which is what
+      // made the slip crawl on low-end PCs while the vector-only facture flew.
+      // Letting the driver use its native resolution keeps text/barcode vector
+      // (still crisp) and cuts the raster payload ~10x. Raise back if the logo
+      // ever looks too soft — but downscale the stored logo instead.
     }, (success, failureReason) => {
       if (success) resolve({ success: true })
       else resolve({ error: failureReason || 'Print cancelled' })
