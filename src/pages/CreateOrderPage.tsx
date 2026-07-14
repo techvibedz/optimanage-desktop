@@ -8,11 +8,12 @@ import {
   ChevronDown, Check, FileText, ScanLine, Loader2, Camera, Video, ListPlus, Pencil
 } from 'lucide-react'
 import OrderSlip from '@/components/print/OrderSlip'
+import { lensUnitCost } from '@/lib/profit'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Customer = { id: string; firstName: string; lastName: string; email?: string; phone?: string }
-type Frame = { id: string; brand: string; model: string; color: string; size: string; sellingPrice: number; stock: number }
-type LensType = { id: string; name: string; category: string; material: string; index: number; sellingPrice: number; stock: number }
+type Frame = { id: string; brand: string; model: string; color: string; size: string; cost?: number; sellingPrice: number; stock: number }
+type LensType = { id: string; name: string; category: string; material: string; index: number; baseCost?: number; priceRanges?: any; sellingPrice: number; stock: number }
 type Prescription = {
   id: string; customerId: string; doctorName: string; examinationDate: string
   hasVLData?: boolean; hasVPData?: boolean
@@ -24,7 +25,7 @@ type Prescription = {
 }
 type SelectedFrame = { id: string; price: number; brand?: string; model?: string }
 type AdditionalService = { name: string; price: number }
-type ContactLens = { id: string; brand: string; model?: string; price: number }
+type ContactLens = { id: string; brand: string; model?: string; price: number; cost?: number }
 
 // ─── Utility: format prescription value ──────────────────────────────────────
 const fmtVal = (v: number | null | undefined, isAxis = false): string => {
@@ -415,7 +416,7 @@ export default function CreateOrderPage() {
   const [vpLeftQty, setVpLeftQty] = useState(1)
 
   // Contact lenses
-  const [selectedContactLenses, setSelectedContactLenses] = useState<{ id: string; brand: string; model?: string; price: number; qty: number }[]>([])
+  const [selectedContactLenses, setSelectedContactLenses] = useState<{ id: string; brand: string; model?: string; price: number; cost: number; qty: number }[]>([])
 
   // Additional services
   const [services, setServices] = useState<AdditionalService[]>([])
@@ -811,6 +812,19 @@ export default function CreateOrderPage() {
   // ─── Build order data from current form state ─────────────────────────
   const buildOrderData = () => {
     const lensTypeId = vlRightLensId || vlLeftLensId || vpRightLensId || vpLeftLensId || undefined
+    // Snapshot the cost of goods for this order: frame + per-eye lens (by the
+    // eye's prescription power) + contact lenses. Net profit = totalPrice − this.
+    const rx = selectedPrescription
+    const lt = (id: string) => lensTypes.find(l => l.id === id)
+    const contactLensItems = selectedContactLenses.map(cl => ({ id: cl.id, brand: cl.brand, model: cl.model, qty: cl.qty, price: cl.price, cost: Number(cl.cost) || 0 }))
+    const frameCost = selectedFrames.reduce((s, f) => s + (Number(frames.find(fr => fr.id === f.id)?.cost) || 0), 0)
+    const lensCost =
+      lensUnitCost(lt(vlRightLensId), rx?.vlRightEyeSphere, rx?.vlRightEyeCylinder) * vlRightQty +
+      lensUnitCost(lt(vlLeftLensId), rx?.vlLeftEyeSphere, rx?.vlLeftEyeCylinder) * vlLeftQty +
+      lensUnitCost(lt(vpRightLensId), rx?.vpRightEyeSphere, rx?.vpRightEyeCylinder) * vpRightQty +
+      lensUnitCost(lt(vpLeftLensId), rx?.vpLeftEyeSphere, rx?.vpLeftEyeCylinder) * vpLeftQty
+    const clCost = contactLensItems.reduce((s, cl) => s + (Number(cl.cost) || 0) * (cl.qty || 1), 0)
+    const orderCost = Math.round(frameCost + lensCost + clCost)
     return {
       orderNumber,
       customerId,
@@ -834,6 +848,8 @@ export default function CreateOrderPage() {
       basePrice: framesTotal + lensTotal,
       addonsPrice: servicesTotal + contactLensTotal,
       totalPrice,
+      orderCost,
+      contactLensItems,
       depositAmount,
       balanceDue,
       status: 'in_progress',
@@ -1567,7 +1583,7 @@ export default function CreateOrderPage() {
                 onChange={e => {
                   const cl = contactLenses.find(c => c.id === e.target.value)
                   if (cl && !selectedContactLenses.find(s => s.id === cl.id)) {
-                    setSelectedContactLenses(prev => [...prev, { id: cl.id, brand: cl.brand, model: cl.model, price: cl.price, qty: 1 }])
+                    setSelectedContactLenses(prev => [...prev, { id: cl.id, brand: cl.brand, model: cl.model, price: cl.price, cost: Number(cl.cost) || 0, qty: 1 }])
                   }
                 }}
                 className="w-full px-3 py-2.5 border border-border rounded-lg text-sm bg-background">

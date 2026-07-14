@@ -544,6 +544,19 @@ export default function OrderDetailsPage() {
                   {Math.max(0, remainingBalance).toLocaleString()} DA
                 </span>
               </div>
+              {order._netProfit != null && !isEditing && (
+                <>
+                  <hr className="border-border/50" />
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">{t('orders.cost') || 'Cost of goods'}</span>
+                    <span className="text-muted-foreground">{(order._cogs || 0).toLocaleString()} DA</span>
+                  </div>
+                  <div className="flex justify-between font-semibold">
+                    <span>{t('orders.netProfit') || 'Net profit'}</span>
+                    <span className={(order._netProfit || 0) >= 0 ? 'text-green-600' : 'text-red-500'}>{(order._netProfit || 0).toLocaleString()} DA</span>
+                  </div>
+                </>
+              )}
               <div className={`flex items-center justify-center gap-2 p-2 rounded-lg border text-xs font-semibold mt-1 ${isFullyPaid
                 ? 'bg-green-50 border-green-200 text-green-700 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400'
                 : 'bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400'}`}>

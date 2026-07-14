@@ -10,6 +10,18 @@ const LENS_CATEGORIES = ['Unifocal', 'Bifocal', 'Progressif', 'Mi-distance', 'So
 const LENS_MATERIALS = ['CR-39', 'Polycarbonate', 'Trivex', 'Haut indice', 'Min\u00e9ral']
 const LENS_INDICES = ['1.50', '1.56', '1.59', '1.60', '1.67', '1.74']
 
+// Stored priceRanges (array or JSON string) → editable string rows.
+const parseRangesForForm = (raw: any): { sphMax: string; cylMax: string; cost: string }[] => {
+  let val = raw
+  if (typeof raw === 'string') { try { val = JSON.parse(raw) } catch { return [] } }
+  if (!Array.isArray(val)) return []
+  return val.map((r: any) => ({
+    sphMax: r?.sphMax == null ? '' : String(r.sphMax),
+    cylMax: r?.cylMax == null ? '' : String(r.cylMax),
+    cost: r?.cost == null ? '' : String(r.cost),
+  }))
+}
+
 export default function InventoryPage() {
   const { t } = useTranslation()
   const { user } = useAuth()
@@ -24,7 +36,10 @@ export default function InventoryPage() {
   const [showCLForm, setShowCLForm] = useState(false)
   const [frameForm, setFrameForm] = useState({ brand: '', model: '', color: '', size: '', cost: '', sellingPrice: '', stock: '' })
   const [lensForm, setLensForm] = useState({ name: '', category: '', material: '', index: '', baseCost: '', sellingPrice: '', stock: '', reorderThreshold: '', supplierName: '', supplierContact: '' })
-  const [clForm, setClForm] = useState({ brand: '', model: '', price: '' })
+  // Per-prescription cost groups for the lens type being edited: each row is
+  // { sphere ≤, cylinder ≤, cost }. Blank bound = no limit on that axis.
+  const [lensRanges, setLensRanges] = useState<{ sphMax: string; cylMax: string; cost: string }[]>([])
+  const [clForm, setClForm] = useState({ brand: '', model: '', price: '', cost: '' })
   const [editingId, setEditingId] = useState<string | null>(null)
 
   useEffect(() => { fetchData() }, [tab, search])
@@ -53,6 +68,7 @@ export default function InventoryPage() {
       brand: clForm.brand,
       model: clForm.model || null,
       price: parseFloat(clForm.price) || 0,
+      cost: parseFloat(clForm.cost) || 0,
     }
     if (editingId) {
       const res = await window.electronAPI.updateContactLens(editingId, payload)
@@ -100,12 +116,20 @@ export default function InventoryPage() {
   const handleLensSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!lensForm.name) { toast.error('Name is required'); return }
+    const priceRanges = lensRanges
+      .filter(r => r.cost !== '' && !isNaN(parseFloat(r.cost)))
+      .map(r => ({
+        sphMax: r.sphMax === '' ? null : parseFloat(r.sphMax),
+        cylMax: r.cylMax === '' ? null : parseFloat(r.cylMax),
+        cost: parseFloat(r.cost) || 0,
+      }))
     const payload = {
       name: lensForm.name,
       category: lensForm.category || '',
       material: lensForm.material || '',
       index: parseFloat(lensForm.index) || 1.5,
       baseCost: parseFloat(lensForm.baseCost) || 0,
+      priceRanges,
       sellingPrice: parseFloat(lensForm.sellingPrice) || 0,
       stock: parseInt(lensForm.stock, 10) || 0,
       reorderThreshold: parseInt(lensForm.reorderThreshold, 10) || 5,
@@ -150,9 +174,10 @@ export default function InventoryPage() {
               setShowFrameForm(true)
             } else if (tab === 'lensTypes') {
               setLensForm({ name: '', category: '', material: '', index: '', baseCost: '', sellingPrice: '', stock: '', reorderThreshold: '', supplierName: '', supplierContact: '' })
+              setLensRanges([])
               setShowLensForm(true)
             } else {
-              setClForm({ brand: '', model: '', price: '' })
+              setClForm({ brand: '', model: '', price: '', cost: '' })
               setShowCLForm(true)
             }
           }}
@@ -269,6 +294,41 @@ export default function InventoryPage() {
                     className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background" />
                 </div>
               </div>
+
+              {/* Prescription cost groups — cost of this lens by sphere/cylinder */}
+              <div className="border-t border-border pt-3">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-sm font-medium">{t('inventory.priceRanges')}</label>
+                  <button type="button" onClick={() => setLensRanges(p => [...p, { sphMax: '', cylMax: '', cost: '' }])}
+                    className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-border hover:bg-muted">
+                    <Plus className="h-3 w-3" /> {t('inventory.addRange')}
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground mb-2">{t('inventory.priceRangesHint')}</p>
+                {lensRanges.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 text-xs text-muted-foreground px-0.5">
+                      <span>{t('inventory.sphereMax')}</span><span>{t('inventory.cylinderMax')}</span><span>{t('inventory.cost')} (DA)</span><span className="w-8" />
+                    </div>
+                    {lensRanges.map((r, i) => (
+                      <div key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-center">
+                        <input type="number" step="any" placeholder="∞" value={r.sphMax}
+                          onChange={e => setLensRanges(p => p.map((x, j) => j === i ? { ...x, sphMax: e.target.value } : x))}
+                          className="w-full px-2 py-1.5 border border-border rounded-lg text-sm bg-background" />
+                        <input type="number" step="any" placeholder="∞" value={r.cylMax}
+                          onChange={e => setLensRanges(p => p.map((x, j) => j === i ? { ...x, cylMax: e.target.value } : x))}
+                          className="w-full px-2 py-1.5 border border-border rounded-lg text-sm bg-background" />
+                        <input type="number" step="any" min="0" placeholder="0" value={r.cost}
+                          onChange={e => setLensRanges(p => p.map((x, j) => j === i ? { ...x, cost: e.target.value } : x))}
+                          className="w-full px-2 py-1.5 border border-border rounded-lg text-sm bg-background" />
+                        <button type="button" onClick={() => setLensRanges(p => p.filter((_, j) => j !== i))}
+                          className="p-1.5 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30"><Trash2 className="h-4 w-4 text-red-500" /></button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setShowLensForm(false)} className="px-4 py-2 text-sm rounded-lg border border-border hover:bg-muted">{t('common.cancel')}</button>
                 <button type="submit" className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90">{editingId ? t('common.update') : t('common.create')}</button>
@@ -296,11 +356,19 @@ export default function InventoryPage() {
                     className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background" />
                 </div>
               </div>
-              <div>
-                <label className="text-sm font-medium text-muted-foreground">{t('common.price')}</label>
-                <input type="number" step="any" min="0" value={clForm.price}
-                  onChange={e => setClForm(p => ({ ...p, price: e.target.value }))}
-                  className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">{t('inventory.cost')}</label>
+                  <input type="number" step="any" min="0" value={clForm.cost}
+                    onChange={e => setClForm(p => ({ ...p, cost: e.target.value }))}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium text-muted-foreground">{t('common.price')}</label>
+                  <input type="number" step="any" min="0" value={clForm.price}
+                    onChange={e => setClForm(p => ({ ...p, price: e.target.value }))}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background" />
+                </div>
               </div>
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={() => setShowCLForm(false)} className="px-4 py-2 text-sm rounded-lg border border-border hover:bg-muted">{t('common.cancel')}</button>
@@ -379,6 +447,7 @@ export default function InventoryPage() {
                             reorderThreshold: l.reorderThreshold != null ? String(l.reorderThreshold) : '',
                             supplierName: l.supplierName || '', supplierContact: l.supplierContact || '',
                           })
+                          setLensRanges(parseRangesForForm(l.priceRanges))
                           setEditingId(l.id); setShowLensForm(true)
                         }} className="p-1.5 rounded-md hover:bg-muted"><Pencil className="h-4 w-4 text-muted-foreground" /></button>
                         <button onClick={() => handleDeleteLens(l.id)} className="p-1.5 rounded-md hover:bg-red-100 dark:hover:bg-red-900/30"><Trash2 className="h-4 w-4 text-red-500" /></button>
@@ -394,12 +463,13 @@ export default function InventoryPage() {
             <div className="empty-state"><Package className="empty-state-icon" /><p className="empty-state-title">{t('inventory.noContactLenses')}</p></div>
           ) : (
             <table className="data-table">
-              <thead><tr><th>{t('inventory.brand')}</th><th>{t('inventory.model')}</th><th>{t('common.price')}</th><th>{t('common.actions')}</th></tr></thead>
+              <thead><tr><th>{t('inventory.brand')}</th><th>{t('inventory.model')}</th><th>{t('inventory.cost')}</th><th>{t('common.price')}</th><th>{t('common.actions')}</th></tr></thead>
               <tbody>
                 {contactLenses.map((c: any) => (
                   <tr key={c.id}>
                     <td className="font-medium">{c.brand}</td>
                     <td>{c.model || '-'}</td>
+                    <td>{(c.cost ?? 0).toLocaleString()} DA</td>
                     <td>{c.price?.toLocaleString()} DA</td>
                     <td>
                       <div className="flex items-center gap-1">
@@ -408,6 +478,7 @@ export default function InventoryPage() {
                             brand: c.brand || '',
                             model: c.model || '',
                             price: c.price != null ? String(c.price) : '',
+                            cost: c.cost != null ? String(c.cost) : '',
                           })
                           setEditingId(c.id); setShowCLForm(true)
                         }} className="p-1.5 rounded-md hover:bg-muted"><Pencil className="h-4 w-4 text-muted-foreground" /></button>

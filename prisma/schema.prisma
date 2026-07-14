@@ -93,6 +93,10 @@ model LensType {
   material         String
   index            Float
   baseCost         Float
+  // Optional per-prescription cost groups: [{ sphMax, cylMax, cost }].
+  // Cost of the lens for an order is looked up by the eye's |sphere|/|cylinder|
+  // against these groups (tightest match wins); falls back to baseCost.
+  priceRanges      Json?
   sellingPrice     Float
   stock            Int      @default(0)
   reorderThreshold Int      @default(5)
@@ -127,6 +131,7 @@ model ContactLens {
   brand        String
   model        String?
   price        Float
+  cost         Float    @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   userId       String
@@ -173,6 +178,12 @@ model Order {
   basePrice              Float
   addonsPrice            Float
   totalPrice             Float
+  // Snapshot of the cost of goods for this order (frame + lenses + contact
+  // lenses), computed at creation. Net profit = totalPrice - orderCost.
+  // Null on orders created before this feature (cost is estimated on read).
+  orderCost              Float?
+  // Snapshot of contact lenses sold on this order: [{ id, brand, model, qty, price, cost }].
+  contactLensItems       Json?
   depositAmount          Float
   balanceDue             Float
   status                 String

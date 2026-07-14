@@ -4,7 +4,7 @@ import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useConnectivityRefresh } from '@/lib/use-connectivity-refresh'
 import { toast } from 'sonner'
-import { Search, CreditCard, Trash2, Receipt, Calendar, DollarSign, Filter, Eye, Plus, Edit, Loader2 } from 'lucide-react'
+import { Search, CreditCard, Trash2, Receipt, Calendar, DollarSign, Filter, Eye, Plus, Edit, Loader2, TrendingUp } from 'lucide-react'
 
 export default function PaymentsPage() {
   const { t } = useTranslation()
@@ -20,6 +20,11 @@ export default function PaymentsPage() {
   const [totalCount, setTotalCount] = useState(0)
   const [totalAmount, setTotalAmount] = useState(0)
 
+  // Net profit section (its own block — separate from revenue/payments above)
+  const [profitFilter, setProfitFilter] = useState('month')
+  const [profit, setProfit] = useState<any>(null)
+  const [profitLoading, setProfitLoading] = useState(true)
+
   // Expenses state
   const [expenses, setExpenses] = useState<any[]>([]);
   const [expensesLoading, setExpensesLoading] = useState(true);
@@ -32,7 +37,21 @@ export default function PaymentsPage() {
 
   useEffect(() => { fetchPayments() }, [page, search, methodFilter, dateFilter])
   useEffect(() => { fetchExpenses() }, [expenseDate, expenseCategoryFilter])
-  useConnectivityRefresh(useCallback(() => { fetchPayments(); fetchExpenses() }, [page, search, methodFilter, dateFilter, expenseDate, expenseCategoryFilter]))
+  useEffect(() => { fetchProfit() }, [profitFilter])
+  useConnectivityRefresh(useCallback(() => { fetchPayments(); fetchExpenses(); fetchProfit() }, [page, search, methodFilter, dateFilter, expenseDate, expenseCategoryFilter, profitFilter]))
+
+  const fetchProfit = async () => {
+    if (!user?.id) return
+    setProfitLoading(true)
+    try {
+      const res = await window.electronAPI.getOrderProfitSummary({ userId: user.id, filter: profitFilter })
+      if (res.data) setProfit(res.data)
+    } catch (err) {
+      console.error('Failed to fetch profit summary:', err)
+    } finally {
+      setProfitLoading(false)
+    }
+  }
 
   const fetchPayments = async () => {
     if (!user?.id) return
@@ -238,6 +257,51 @@ export default function PaymentsPage() {
           </div>
           <p className="text-xl font-bold">{stats.todayTotal.toLocaleString()} DA</p>
         </div>
+      </div>
+
+      {/* Net Profit — its own section, separate from the revenue/payments cards above */}
+      <div className="bg-white dark:bg-gray-800/50 rounded-xl border border-border/50 p-5 mb-5">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5 text-emerald-600" />
+            <h2 className="text-lg font-semibold">{t('payments.netProfitTitle') || 'Net Profit'}</h2>
+          </div>
+          <select value={profitFilter} onChange={e => setProfitFilter(e.target.value)}
+            className="px-3 py-1.5 border border-border rounded-lg text-xs bg-background focus:outline-none">
+            <option value="all">{t('common.allTime') || 'All Time'}</option>
+            <option value="today">{t('common.today') || 'Today'}</option>
+            <option value="week">{t('common.thisWeek') || 'This Week'}</option>
+            <option value="month">{t('common.thisMonth') || 'This Month'}</option>
+          </select>
+        </div>
+        {profitLoading ? (
+          <div className="flex items-center justify-center h-24"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="p-3 rounded-lg bg-muted/40">
+              <p className="text-xs text-muted-foreground">{t('payments.ordersValue') || 'Orders value'}</p>
+              <p className="text-lg font-bold">{(profit?.orderRevenue || 0).toLocaleString()} DA</p>
+              <p className="text-[10px] text-muted-foreground">{profit?.orderCount || 0} {t('nav.orders') || 'orders'}</p>
+            </div>
+            <div className="p-3 rounded-lg bg-muted/40">
+              <p className="text-xs text-muted-foreground">{t('payments.costOfGoods') || 'Cost of goods'}</p>
+              <p className="text-lg font-bold text-orange-600">− {(profit?.cogs || 0).toLocaleString()} DA</p>
+            </div>
+            <div className="p-3 rounded-lg bg-muted/40">
+              <p className="text-xs text-muted-foreground">{t('payments.grossProfit') || 'Gross profit'}</p>
+              <p className="text-lg font-bold">{(profit?.grossProfit || 0).toLocaleString()} DA</p>
+            </div>
+            <div className="p-3 rounded-lg bg-muted/40">
+              <p className="text-xs text-muted-foreground">{t('expenses.title') || 'Expenses'}</p>
+              <p className="text-lg font-bold text-red-600">− {(profit?.expenses || 0).toLocaleString()} DA</p>
+            </div>
+            <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
+              <p className="text-xs text-emerald-700 dark:text-emerald-400">{t('payments.netProfitTitle') || 'Net Profit'}</p>
+              <p className={`text-xl font-bold ${(profit?.netProfit || 0) >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600'}`}>{(profit?.netProfit || 0).toLocaleString()} DA</p>
+            </div>
+          </div>
+        )}
+        <p className="text-[11px] text-muted-foreground mt-2">{t('payments.netProfitHint') || 'Orders value = money received on orders (unpaid balances excluded). Net profit = orders value − cost of goods − expenses.'}</p>
       </div>
 
       {/* Filters */}

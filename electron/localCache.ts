@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import path from 'node:path'
 import Database from 'better-sqlite3'
+import { effectiveOrderCogs, orderNetProfit } from './profit'
 
 // ─── Local SQLite database for offline cache ─────────────────────────────────
 let db: Database.Database | null = null
@@ -78,6 +79,7 @@ function initTables() {
       material TEXT NOT NULL,
       "index" REAL NOT NULL,
       baseCost REAL NOT NULL,
+      priceRanges TEXT,
       sellingPrice REAL NOT NULL,
       stock INTEGER DEFAULT 0,
       reorderThreshold INTEGER DEFAULT 5,
@@ -93,6 +95,7 @@ function initTables() {
       brand TEXT NOT NULL,
       model TEXT,
       price REAL NOT NULL,
+      cost REAL NOT NULL DEFAULT 0,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL,
       userId TEXT NOT NULL
@@ -117,6 +120,8 @@ function initTables() {
       basePrice REAL NOT NULL DEFAULT 0,
       addonsPrice REAL NOT NULL DEFAULT 0,
       totalPrice REAL NOT NULL DEFAULT 0,
+      orderCost REAL,
+      contactLensItems TEXT,
       depositAmount REAL NOT NULL DEFAULT 0,
       balanceDue REAL NOT NULL DEFAULT 0,
       status TEXT NOT NULL,
@@ -197,15 +202,22 @@ function initTables() {
   `)
 
   // ─── Idempotent migrations for existing DBs ──────────────────────────────
-  // Add `nif` column to settings if upgrading from a build that didn't have it.
-  try {
-    const cols = d.prepare(`PRAGMA table_info(settings)`).all() as Array<{ name: string }>
-    if (!cols.some(c => c.name === 'nif')) {
-      d.exec(`ALTER TABLE settings ADD COLUMN nif TEXT`)
+  // Add columns introduced after a table's first ship. Each guarded by a
+  // table_info check so re-running is a no-op.
+  const addColumnIfMissing = (table: string, column: string, ddl: string) => {
+    try {
+      const cols = d.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+      if (!cols.some(c => c.name === column)) d.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`)
+    } catch (e) {
+      // Non-fatal: column probably already exists or table missing; safe to ignore.
     }
-  } catch (e) {
-    // Non-fatal: column probably already exists or table missing; safe to ignore.
   }
+  addColumnIfMissing('settings', 'nif', 'nif TEXT')
+  // Net-profit feature: lens cost groups, contact-lens cost, order cost snapshot.
+  addColumnIfMissing('lensTypes', 'priceRanges', 'priceRanges TEXT')
+  addColumnIfMissing('contactLenses', 'cost', 'cost REAL NOT NULL DEFAULT 0')
+  addColumnIfMissing('orders', 'orderCost', 'orderCost REAL')
+  addColumnIfMissing('orders', 'contactLensItems', 'contactLensItems TEXT')
 }
 
 // ─── Helper: convert Date fields to ISO strings for SQLite ──────────────────
@@ -213,6 +225,21 @@ function toIso(val: any): string {
   if (!val) return new Date().toISOString()
   if (val instanceof Date) return val.toISOString()
   return String(val)
+}
+
+// Store a JSON column: pass strings through (already-serialised, e.g. re-cached
+// from SQLite), stringify arrays/objects (from Prisma/the frontend), null otherwise.
+function toJson(val: any): string | null {
+  if (val == null) return null
+  if (typeof val === 'string') return val
+  try { return JSON.stringify(val) } catch { return null }
+}
+
+// Parse a JSON column back to a value; tolerate already-parsed input and junk.
+function fromJson(val: any): any {
+  if (val == null) return null
+  if (typeof val !== 'string') return val
+  try { return JSON.parse(val) } catch { return null }
 }
 
 // ─── Upsert helpers ─────────────────────────────────────────────────────────
@@ -233,15 +260,15 @@ export function cacheOrder(o: any) {
   d.prepare(`INSERT OR REPLACE INTO orders (id,orderNumber,customerId,prescriptionId,frameId,lensTypeId,
     vlRightEyeLensTypeId,vlLeftEyeLensTypeId,vpRightEyeLensTypeId,vpLeftEyeLensTypeId,
     framePrice,vlRightEyeLensPrice,vlLeftEyeLensPrice,vpRightEyeLensPrice,vpLeftEyeLensPrice,
-    basePrice,addonsPrice,totalPrice,depositAmount,balanceDue,status,
+    basePrice,addonsPrice,totalPrice,orderCost,contactLensItems,depositAmount,balanceDue,status,
     expectedCompletionDate,actualCompletionDate,customerNotes,technicalNotes,
     createdAt,updatedAt,userId,
     vlLeftEyeLensQuantity,vlRightEyeLensQuantity,vpLeftEyeLensQuantity,vpRightEyeLensQuantity)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     o.id, o.orderNumber, o.customerId, o.prescriptionId||null, o.frameId||null, o.lensTypeId||null,
     o.vlRightEyeLensTypeId||null, o.vlLeftEyeLensTypeId||null, o.vpRightEyeLensTypeId||null, o.vpLeftEyeLensTypeId||null,
     o.framePrice??null, o.vlRightEyeLensPrice??null, o.vlLeftEyeLensPrice??null, o.vpRightEyeLensPrice??null, o.vpLeftEyeLensPrice??null,
-    o.basePrice||0, o.addonsPrice||0, o.totalPrice||0, o.depositAmount||0, o.balanceDue||0, o.status,
+    o.basePrice||0, o.addonsPrice||0, o.totalPrice||0, o.orderCost??null, toJson(o.contactLensItems), o.depositAmount||0, o.balanceDue||0, o.status,
     toIso(o.expectedCompletionDate), o.actualCompletionDate ? toIso(o.actualCompletionDate) : null,
     o.customerNotes||null, o.technicalNotes||null,
     toIso(o.createdAt), toIso(o.updatedAt), o.userId,
@@ -293,9 +320,9 @@ export function cacheFrame(f: any) {
 
 export function cacheLensType(lt: any) {
   const d = getDb()
-  d.prepare(`INSERT OR REPLACE INTO lensTypes (id,name,category,material,"index",baseCost,sellingPrice,stock,reorderThreshold,supplierName,supplierContact,createdAt,updatedAt,userId)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
-    lt.id, lt.name, lt.category, lt.material, lt.index, lt.baseCost, lt.sellingPrice,
+  d.prepare(`INSERT OR REPLACE INTO lensTypes (id,name,category,material,"index",baseCost,priceRanges,sellingPrice,stock,reorderThreshold,supplierName,supplierContact,createdAt,updatedAt,userId)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+    lt.id, lt.name, lt.category, lt.material, lt.index, lt.baseCost, toJson(lt.priceRanges), lt.sellingPrice,
     lt.stock||0, lt.reorderThreshold||5, lt.supplierName, lt.supplierContact,
     toIso(lt.createdAt), toIso(lt.updatedAt), lt.userId
   )
@@ -400,9 +427,9 @@ export function deleteLocalLensType(id: string) {
 
 export function cacheContactLens(c: any) {
   const d = getDb()
-  d.prepare(`INSERT OR REPLACE INTO contactLenses (id,brand,model,price,createdAt,updatedAt,userId)
-    VALUES (?,?,?,?,?,?,?)`).run(
-    c.id, c.brand, c.model || null, c.price,
+  d.prepare(`INSERT OR REPLACE INTO contactLenses (id,brand,model,price,cost,createdAt,updatedAt,userId)
+    VALUES (?,?,?,?,?,?,?,?)`).run(
+    c.id, c.brand, c.model || null, c.price, c.cost ?? 0,
     toIso(c.createdAt), toIso(c.updatedAt), c.userId
   )
 }
@@ -542,7 +569,14 @@ export function getLocalOrder(id: string): any {
   order.vlLeftEyeLensType = order.vlLeftEyeLensTypeId ? d.prepare('SELECT * FROM lensTypes WHERE id=?').get(order.vlLeftEyeLensTypeId) : null
   order.vpRightEyeLensType = order.vpRightEyeLensTypeId ? d.prepare('SELECT * FROM lensTypes WHERE id=?').get(order.vpRightEyeLensTypeId) : null
   order.vpLeftEyeLensType = order.vpLeftEyeLensTypeId ? d.prepare('SELECT * FROM lensTypes WHERE id=?').get(order.vpLeftEyeLensTypeId) : null
+  for (const lt of [order.lensType, order.vlRightEyeLensType, order.vlLeftEyeLensType, order.vpRightEyeLensType, order.vpLeftEyeLensType]) {
+    if (lt) lt.priceRanges = fromJson(lt.priceRanges)
+  }
+  order.contactLensItems = fromJson(order.contactLensItems)
   order.payments = d.prepare('SELECT * FROM payments WHERE orderId=? ORDER BY createdAt DESC').all(order.id)
+  // Cost of goods + net profit (snapshot when present, lens-estimate otherwise).
+  order._cogs = Math.round(effectiveOrderCogs(order))
+  order._netProfit = Math.round(orderNetProfit(order))
   return order
 }
 
@@ -617,7 +651,9 @@ export function getLocalContactLenses(userId: string, search?: string): any[] {
 }
 
 export function getLocalLensTypes(userId: string): any[] {
-  return getDb().prepare('SELECT * FROM lensTypes WHERE userId=? ORDER BY name ASC').all(userId)
+  const rows = getDb().prepare('SELECT * FROM lensTypes WHERE userId=? ORDER BY name ASC').all(userId) as any[]
+  for (const r of rows) r.priceRanges = fromJson(r.priceRanges)
+  return rows
 }
 
 export function getLocalSettings(userId: string): any {
@@ -847,6 +883,63 @@ export function getLocalDashboardStats(userId: string, filter: string = 'all'): 
       collectionRate: totalOrderAmount > 0 ? Math.round((formattedPayments / totalOrderAmount) * 100) : 0,
     },
     lastUpdated: new Date().toISOString(),
+    filter,
+    currency: 'DA',
+  }
+}
+
+// Net profit summary from local cache — mirrors the online orders:profitSummary
+// handler so the figure is identical offline. Net profit = Σ(order total −
+// order cost) − expenses over the period.
+export function getLocalOrderProfitSummary(userId: string, filter: string = 'all'): any {
+  const d = getDb()
+  const now = new Date()
+  let orderDateFilter = ''
+  const orderArgs: any[] = [userId]
+  let expenseDateFilter = ''
+  const expenseArgs: any[] = [userId]
+  let payDateFilter = ''
+  const payArgs: any[] = [userId]
+  const setRange = (startIso: string) => {
+    orderDateFilter = ' AND createdAt >= ? AND createdAt <= ?'; orderArgs.push(startIso, now.toISOString())
+    expenseDateFilter = ' AND date >= ? AND date <= ?'; expenseArgs.push(startIso, now.toISOString())
+    payDateFilter = ' AND paymentDate >= ? AND paymentDate <= ?'; payArgs.push(startIso, now.toISOString())
+  }
+  if (filter === 'today') setRange(new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString())
+  else if (filter === 'week') { const s = new Date(now); s.setDate(now.getDate() - now.getDay()); s.setHours(0, 0, 0, 0); setRange(s.toISOString()) }
+  else if (filter === 'month') setRange(new Date(now.getFullYear(), now.getMonth(), 1).toISOString())
+
+  // Revenue = money actually received on orders (by payment date). Unpaid
+  // balances are excluded. Cost = full cost of orders created in the period.
+  const orderRevenue = (d.prepare(
+    `SELECT COALESCE(SUM(amount),0) as s FROM payments WHERE orderId IN (SELECT id FROM orders WHERE userId=?)${payDateFilter}`
+  ).get(...payArgs) as any).s
+
+  const orders = d.prepare(`SELECT * FROM orders WHERE userId=?${orderDateFilter}`).all(...orderArgs) as any[]
+  const rxStmt = d.prepare('SELECT * FROM prescriptions WHERE id=?')
+  const ltStmt = d.prepare('SELECT baseCost, priceRanges FROM lensTypes WHERE id=?')
+  let cogs = 0
+  for (const o of orders) {
+    if (o.orderCost != null) { cogs += Number(o.orderCost) || 0; continue }
+    // Legacy order (no snapshot): estimate lens cost from stored types + rx.
+    o.prescription = o.prescriptionId ? rxStmt.get(o.prescriptionId) : null
+    o.lensType = o.lensTypeId ? ltStmt.get(o.lensTypeId) : null
+    o.vlRightEyeLensType = o.vlRightEyeLensTypeId ? ltStmt.get(o.vlRightEyeLensTypeId) : null
+    o.vlLeftEyeLensType = o.vlLeftEyeLensTypeId ? ltStmt.get(o.vlLeftEyeLensTypeId) : null
+    o.vpRightEyeLensType = o.vpRightEyeLensTypeId ? ltStmt.get(o.vpRightEyeLensTypeId) : null
+    o.vpLeftEyeLensType = o.vpLeftEyeLensTypeId ? ltStmt.get(o.vpLeftEyeLensTypeId) : null
+    cogs += effectiveOrderCogs(o)
+  }
+  const expRow = d.prepare(`SELECT COALESCE(SUM(amount),0) as s FROM expenses WHERE userId=?${expenseDateFilter}`).get(...expenseArgs) as any
+  const expenses = expRow?.s || 0
+  const grossProfit = orderRevenue - cogs
+  return {
+    orderRevenue: Math.round(orderRevenue),
+    cogs: Math.round(cogs),
+    grossProfit: Math.round(grossProfit),
+    expenses: Math.round(expenses),
+    netProfit: Math.round(grossProfit - expenses),
+    orderCount: orders.length,
     filter,
     currency: 'DA',
   }

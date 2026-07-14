@@ -11,6 +11,7 @@ import { logger, logInfo, logError } from './logger'
 import { initMonitoring, captureException, closeMonitoring, getIpcTimings } from './monitoring-stub'
 import * as localCache from './localCache'
 import * as syncManager from './syncManager'
+import { effectiveOrderCogs, orderNetProfit } from './profit'
 
 // ─── Prisma: redirect requires to extraResources in production ───────────────
 if (app.isPackaged) {
@@ -1267,11 +1268,11 @@ function pickFields<T extends Record<string, any>>(input: any, allowed: readonly
 
 // Allowed fields per model (mirror the Prisma schema writable columns)
 const FRAME_FIELDS = ['brand', 'model', 'color', 'size', 'cost', 'sellingPrice', 'stock', 'userId'] as const
-const LENS_TYPE_FIELDS = ['name', 'category', 'material', 'index', 'baseCost', 'sellingPrice', 'stock', 'reorderThreshold', 'supplierName', 'supplierContact', 'userId'] as const
-const CONTACT_LENS_FIELDS = ['brand', 'model', 'price', 'userId'] as const
+const LENS_TYPE_FIELDS = ['name', 'category', 'material', 'index', 'baseCost', 'priceRanges', 'sellingPrice', 'stock', 'reorderThreshold', 'supplierName', 'supplierContact', 'userId'] as const
+const CONTACT_LENS_FIELDS = ['brand', 'model', 'price', 'cost', 'userId'] as const
 const CUSTOMER_FIELDS = ['firstName', 'lastName', 'email', 'phone', 'dateOfBirth', 'address', 'insuranceProvider', 'insurancePolicyNumber', 'insuranceCoverageDetails', 'notes', 'userId'] as const
 const PRESCRIPTION_FIELDS = ['customerId', 'examinationDate', 'doctorName', 'doctorLicense', 'pupillaryDistance', 'readingDistance', 'expirationDate', 'notes', 'hasVLData', 'hasVPData', 'vlLeftEyeAxis', 'vlLeftEyeCylinder', 'vlLeftEyePrism', 'vlLeftEyeSphere', 'vlRightEyeAxis', 'vlRightEyeCylinder', 'vlRightEyePrism', 'vlRightEyeSphere', 'vpLeftEyeAxis', 'vpLeftEyeCylinder', 'vpLeftEyePrism', 'vpLeftEyeSphere', 'vpRightEyeAxis', 'vpRightEyeCylinder', 'vpRightEyePrism', 'vpRightEyeSphere', 'vpLeftEyeAdd', 'vpRightEyeAdd'] as const
-const ORDER_FIELDS = ['orderNumber', 'customerId', 'prescriptionId', 'frameId', 'lensTypeId', 'vlRightEyeLensTypeId', 'vlLeftEyeLensTypeId', 'vpRightEyeLensTypeId', 'vpLeftEyeLensTypeId', 'framePrice', 'vlRightEyeLensPrice', 'vlLeftEyeLensPrice', 'vpRightEyeLensPrice', 'vpLeftEyeLensPrice', 'basePrice', 'addonsPrice', 'totalPrice', 'depositAmount', 'balanceDue', 'status', 'expectedCompletionDate', 'actualCompletionDate', 'customerNotes', 'technicalNotes', 'userId', 'vlLeftEyeLensQuantity', 'vlRightEyeLensQuantity', 'vpLeftEyeLensQuantity', 'vpRightEyeLensQuantity'] as const
+const ORDER_FIELDS = ['orderNumber', 'customerId', 'prescriptionId', 'frameId', 'lensTypeId', 'vlRightEyeLensTypeId', 'vlLeftEyeLensTypeId', 'vpRightEyeLensTypeId', 'vpLeftEyeLensTypeId', 'framePrice', 'vlRightEyeLensPrice', 'vlLeftEyeLensPrice', 'vpRightEyeLensPrice', 'vpLeftEyeLensPrice', 'basePrice', 'addonsPrice', 'totalPrice', 'orderCost', 'contactLensItems', 'depositAmount', 'balanceDue', 'status', 'expectedCompletionDate', 'actualCompletionDate', 'customerNotes', 'technicalNotes', 'userId', 'vlLeftEyeLensQuantity', 'vlRightEyeLensQuantity', 'vpLeftEyeLensQuantity', 'vpRightEyeLensQuantity'] as const
 const PAYMENT_FIELDS = ['orderId', 'amount', 'paymentMethod', 'paymentDate', 'receiptNumber', 'reference', 'description', 'type', 'userId'] as const
 const EXPENSE_FIELDS = ['description', 'amount', 'category', 'date', 'notes', 'userId'] as const
 
@@ -1767,6 +1768,10 @@ function registerIpcHandlers() {
         if (data.vlLeftEyeLensType) localCache.cacheLensType(data.vlLeftEyeLensType)
         if (data.vpRightEyeLensType) localCache.cacheLensType(data.vpRightEyeLensType)
         if (data.vpLeftEyeLensType) localCache.cacheLensType(data.vpLeftEyeLensType)
+        // Attach cost of goods + net profit for this order (snapshot when
+        // present, lens-estimate for legacy orders).
+        ;(data as any)._cogs = Math.round(effectiveOrderCogs(data))
+        ;(data as any)._netProfit = Math.round(orderNetProfit(data))
       }
       return { data }
     } catch (err: any) {
@@ -2605,6 +2610,84 @@ function registerIpcHandlers() {
   })
 
   // ── Dashboard Stats (matches web app's /api/dashboard/stats exactly) ─────
+  // Net profit summary — its own section (kept separate from revenue/payments).
+  // Net profit = Σ(order.totalPrice − order cost) − expenses, over the period.
+  ipcMain.handle('orders:profitSummary', async (_e, params: any) => {
+    try {
+      if (!isDbAvailable()) {
+        return { data: localCache.getLocalOrderProfitSummary(params.userId, params.filter) }
+      }
+      const { userId, filter = 'all', startDate: startParam, endDate: endParam } = params
+      const now = new Date()
+      let startDate: Date | null = null
+      let endDate = new Date(now)
+      switch (filter) {
+        case 'today': startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate()); break
+        case 'week': { const day = now.getDay(); startDate = new Date(now); startDate.setDate(now.getDate() - day); startDate.setHours(0, 0, 0, 0); break }
+        case 'month': startDate = new Date(now.getFullYear(), now.getMonth(), 1); break
+        case 'custom':
+          if (startParam) startDate = new Date(startParam)
+          if (endParam) { endDate = new Date(endParam); if (String(endParam).indexOf('T') === -1) endDate.setHours(23, 59, 59, 999) }
+          break
+      }
+
+      const orderWhere: any = startDate ? { AND: [{ userId }, { createdAt: { gte: startDate, lte: endDate } }] } : { userId }
+      const expenseWhere: any = { userId, ...(startDate ? { date: { gte: startDate, lte: endDate } } : {}) }
+      // Revenue = money actually RECEIVED on orders (by payment date) — unpaid
+      // balances are not counted. Cost = FULL cost of orders CREATED in the period.
+      const paymentWhere: any = {
+        AND: [
+          { order: { userId } },
+          ...(startDate ? [{ paymentDate: { gte: startDate, lte: endDate } }] : []),
+        ],
+      }
+
+      const [orders, paymentsAgg, expenseAgg] = await Promise.all([
+        prisma.order.findMany({
+          where: orderWhere,
+          select: {
+            totalPrice: true, orderCost: true,
+            vlRightEyeLensQuantity: true, vlLeftEyeLensQuantity: true, vpRightEyeLensQuantity: true, vpLeftEyeLensQuantity: true,
+            prescription: true,
+            lensType: { select: { baseCost: true, priceRanges: true } },
+            vlRightEyeLensType: { select: { baseCost: true, priceRanges: true } },
+            vlLeftEyeLensType: { select: { baseCost: true, priceRanges: true } },
+            vpRightEyeLensType: { select: { baseCost: true, priceRanges: true } },
+            vpLeftEyeLensType: { select: { baseCost: true, priceRanges: true } },
+          },
+        }),
+        prisma.payment.aggregate({ where: paymentWhere, _sum: { amount: true } }),
+        prisma.expense.aggregate({ where: expenseWhere, _sum: { amount: true } }),
+      ])
+
+      let cogs = 0
+      for (const o of orders) cogs += effectiveOrderCogs(o)
+      const orderRevenue = paymentsAgg._sum.amount || 0
+      const expenses = expenseAgg._sum.amount || 0
+      const grossProfit = orderRevenue - cogs
+      const netProfit = grossProfit - expenses
+
+      markDbReachable()
+      return {
+        data: {
+          orderRevenue: Math.round(orderRevenue),
+          cogs: Math.round(cogs),
+          grossProfit: Math.round(grossProfit),
+          expenses: Math.round(expenses),
+          netProfit: Math.round(netProfit),
+          orderCount: orders.length,
+          filter,
+          currency: 'DA',
+        },
+      }
+    } catch (err: any) {
+      if (isNetworkError(err)) {
+        return { data: localCache.getLocalOrderProfitSummary(params.userId, params.filter) }
+      }
+      return { error: err.message }
+    }
+  })
+
   ipcMain.handle('dashboard:stats', async (_e, params: any) => {
     try {
       if (!isDbAvailable()) {

@@ -94,6 +94,7 @@ export interface ElectronAPI {
   getDashboardStats: (params: any) => Promise<{ data?: any; error?: string }>
   getRevenueTimeline: (params: any) => Promise<{ data?: { date: string; revenue: number; expenses: number; net: number }[]; error?: string }>
   getRecentActivity: (params: any) => Promise<{ data?: any[]; error?: string }>
+  getOrderProfitSummary: (params: { userId: string; filter?: string; startDate?: string; endDate?: string }) => Promise<{ data?: any; error?: string }>
 
   // AI
   scanOrdonnance: (imageBase64: string) => Promise<{ data?: ParsedPrescriptionData; error?: string }>
