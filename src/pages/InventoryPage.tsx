@@ -238,7 +238,7 @@ export default function InventoryPage() {
       {/* Lens Type Form Modal */}
       {showLensForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowLensForm(false)}>
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 w-full max-w-lg shadow-xl" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h2 className="text-lg font-semibold mb-4">{editingId ? t('inventory.editLensType') : t('inventory.addLensType')}</h2>
             <form onSubmit={handleLensSubmit} className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
