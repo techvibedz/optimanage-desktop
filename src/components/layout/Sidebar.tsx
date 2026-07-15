@@ -8,7 +8,7 @@ import CameraBarcodeScanner from '@/components/CameraBarcodeScanner'
 import MobileScannerModal from '@/components/MobileScannerModal'
 import {
   LayoutDashboard, Users, ShoppingCart, FileText, CreditCard,
-  Package, Settings, Eye, LogOut, BarChart3, Sun, Moon, Zap, ScanLine, Smartphone
+  Package, Settings, Eye, LogOut, BarChart3, Sun, Moon, Zap, ScanLine, Smartphone, Calculator
 } from 'lucide-react'
 
 const navItems = [
@@ -18,6 +18,7 @@ const navItems = [
   { title: 'nav.orders', href: '/orders', icon: ShoppingCart },
   { title: 'nav.prescriptions', href: '/prescriptions', icon: FileText },
   { title: 'nav.lensSummary', href: '/lens-summary', icon: BarChart3 },
+  { title: 'nav.lensCostCalculator', href: '/lens-cost-calculator', icon: Calculator },
   { title: 'nav.payments', href: '/payments', icon: CreditCard },
   { title: 'nav.inventory', href: '/inventory', icon: Package },
   { title: 'nav.userManagement', href: '/users', icon: Users, adminOnly: true },

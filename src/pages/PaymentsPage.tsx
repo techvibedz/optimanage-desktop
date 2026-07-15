@@ -4,7 +4,7 @@ import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useConnectivityRefresh } from '@/lib/use-connectivity-refresh'
 import { toast } from 'sonner'
-import { Search, CreditCard, Trash2, Receipt, Calendar, DollarSign, Filter, Eye, Plus, Edit, Loader2, TrendingUp } from 'lucide-react'
+import { Search, CreditCard, Trash2, Receipt, Calendar, CalendarDays, DollarSign, Filter, Eye, Plus, Edit, Loader2, TrendingUp } from 'lucide-react'
 
 export default function PaymentsPage() {
   const { t } = useTranslation()
@@ -21,7 +21,9 @@ export default function PaymentsPage() {
   const [totalAmount, setTotalAmount] = useState(0)
 
   // Net profit section (its own block — separate from revenue/payments above)
-  const [profitFilter, setProfitFilter] = useState('month')
+  const [profitFilter, setProfitFilter] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('month')
+  const [profitCustomStart, setProfitCustomStart] = useState('')
+  const [profitCustomEnd, setProfitCustomEnd] = useState('')
   const [profit, setProfit] = useState<any>(null)
   const [profitLoading, setProfitLoading] = useState(true)
 
@@ -37,20 +39,37 @@ export default function PaymentsPage() {
 
   useEffect(() => { fetchPayments() }, [page, search, methodFilter, dateFilter])
   useEffect(() => { fetchExpenses() }, [expenseDate, expenseCategoryFilter])
-  useEffect(() => { fetchProfit() }, [profitFilter])
-  useConnectivityRefresh(useCallback(() => { fetchPayments(); fetchExpenses(); fetchProfit() }, [page, search, methodFilter, dateFilter, expenseDate, expenseCategoryFilter, profitFilter]))
+  useEffect(() => { if (user?.id) fetchProfit(profitFilter, profitCustomStart, profitCustomEnd) }, [user?.id])
+  useConnectivityRefresh(useCallback(() => { fetchPayments(); fetchExpenses(); fetchProfit(profitFilter, profitCustomStart, profitCustomEnd) }, [page, search, methodFilter, dateFilter, expenseDate, expenseCategoryFilter, profitFilter, profitCustomStart, profitCustomEnd]))
 
-  const fetchProfit = async () => {
+  const fetchProfit = async (filter: string, start?: string, end?: string) => {
     if (!user?.id) return
     setProfitLoading(true)
     try {
-      const res = await window.electronAPI.getOrderProfitSummary({ userId: user.id, filter: profitFilter })
+      const res = await window.electronAPI.getOrderProfitSummary({
+        userId: user.id,
+        filter,
+        ...(filter === 'custom' && start && end ? { startDate: start, endDate: end } : {}),
+      })
       if (res.data) setProfit(res.data)
     } catch (err) {
       console.error('Failed to fetch profit summary:', err)
     } finally {
       setProfitLoading(false)
     }
+  }
+
+  const handleProfitFilterChange = (filter: 'all' | 'today' | 'week' | 'month' | 'custom') => {
+    setProfitFilter(filter)
+    if (filter === 'custom') {
+      if (profitCustomStart && profitCustomEnd) fetchProfit('custom', profitCustomStart, profitCustomEnd)
+    } else {
+      fetchProfit(filter)
+    }
+  }
+
+  const handleProfitCustomApply = () => {
+    if (profitCustomStart && profitCustomEnd) fetchProfit('custom', profitCustomStart, profitCustomEnd)
   }
 
   const fetchPayments = async () => {
@@ -266,13 +285,34 @@ export default function PaymentsPage() {
             <TrendingUp className="h-5 w-5 text-emerald-600" />
             <h2 className="text-lg font-semibold">{t('payments.netProfitTitle') || 'Net Profit'}</h2>
           </div>
-          <select value={profitFilter} onChange={e => setProfitFilter(e.target.value)}
-            className="px-3 py-1.5 border border-border rounded-lg text-xs bg-background focus:outline-none">
-            <option value="all">{t('common.allTime') || 'All Time'}</option>
-            <option value="today">{t('common.today') || 'Today'}</option>
-            <option value="week">{t('common.thisWeek') || 'This Week'}</option>
-            <option value="month">{t('common.thisMonth') || 'This Month'}</option>
-          </select>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="inline-flex gap-1 bg-white/60 dark:bg-gray-800/60 rounded-xl p-1 border border-border/50">
+            {(['today', 'week', 'month', 'all', 'custom'] as const).map(f => (
+              <button key={f}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${profitFilter === f
+                  ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground hover:bg-white dark:hover:bg-gray-700'}`}
+                onClick={() => handleProfitFilterChange(f)}>
+                {f === 'custom' ? (
+                  <span className="flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5" />{t('dashboard.custom') || 'Custom'}</span>
+                ) : t(`common.${f === 'week' ? 'thisWeek' : f === 'month' ? 'thisMonth' : f === 'all' ? 'allTime' : 'today'}`)}
+              </button>
+            ))}
+          </div>
+          {profitFilter === 'custom' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <input type="date" value={profitCustomStart} onChange={e => setProfitCustomStart(e.target.value)}
+                className="px-3 py-1.5 rounded-lg border border-border bg-white dark:bg-gray-800 text-xs" />
+              <span className="text-muted-foreground text-xs">→</span>
+              <input type="date" value={profitCustomEnd} onChange={e => setProfitCustomEnd(e.target.value)}
+                className="px-3 py-1.5 rounded-lg border border-border bg-white dark:bg-gray-800 text-xs" />
+              <button onClick={handleProfitCustomApply}
+                disabled={!profitCustomStart || !profitCustomEnd}
+                className="px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 disabled:pointer-events-none">
+                {t('common.confirm') || 'Confirm'}
+              </button>
+            </div>
+          )}
+        </div>
         </div>
         {profitLoading ? (
           <div className="flex items-center justify-center h-24"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>

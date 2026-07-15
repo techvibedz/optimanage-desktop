@@ -22,6 +22,14 @@ const parseRangesForForm = (raw: any): { sphMax: string; cylMax: string; cost: s
   }))
 }
 
+// A lens type "has groups" when it carries at least one prescription cost
+// group — in that case the base cost is irrelevant, the table shows "Groups".
+const lensHasGroups = (l: any): boolean => {
+  let val = l?.priceRanges
+  if (typeof val === 'string') { try { val = JSON.parse(val) } catch { return false } }
+  return Array.isArray(val) && val.length > 0
+}
+
 export default function InventoryPage() {
   const { t } = useTranslation()
   const { user } = useAuth()
@@ -35,7 +43,7 @@ export default function InventoryPage() {
   const [showLensForm, setShowLensForm] = useState(false)
   const [showCLForm, setShowCLForm] = useState(false)
   const [frameForm, setFrameForm] = useState({ brand: '', model: '', color: '', size: '', cost: '', sellingPrice: '', stock: '' })
-  const [lensForm, setLensForm] = useState({ name: '', category: '', material: '', index: '', baseCost: '', sellingPrice: '', stock: '', reorderThreshold: '', supplierName: '', supplierContact: '' })
+  const [lensForm, setLensForm] = useState({ name: '', category: '', material: '', index: '', baseCost: '', sellingPrice: '', reorderThreshold: '', supplierName: '', supplierContact: '' })
   // Per-prescription cost groups for the lens type being edited: each row is
   // { sphere ≤, cylinder ≤, cost }. Blank bound = no limit on that axis.
   const [lensRanges, setLensRanges] = useState<{ sphMax: string; cylMax: string; cost: string }[]>([])
@@ -131,7 +139,6 @@ export default function InventoryPage() {
       baseCost: parseFloat(lensForm.baseCost) || 0,
       priceRanges,
       sellingPrice: parseFloat(lensForm.sellingPrice) || 0,
-      stock: parseInt(lensForm.stock, 10) || 0,
       reorderThreshold: parseInt(lensForm.reorderThreshold, 10) || 5,
       supplierName: lensForm.supplierName || '',
       supplierContact: lensForm.supplierContact || '',
@@ -173,7 +180,7 @@ export default function InventoryPage() {
               setFrameForm({ brand: '', model: '', color: '', size: '', cost: '', sellingPrice: '', stock: '' })
               setShowFrameForm(true)
             } else if (tab === 'lensTypes') {
-              setLensForm({ name: '', category: '', material: '', index: '', baseCost: '', sellingPrice: '', stock: '', reorderThreshold: '', supplierName: '', supplierContact: '' })
+              setLensForm({ name: '', category: '', material: '', index: '', baseCost: '', sellingPrice: '', reorderThreshold: '', supplierName: '', supplierContact: '' })
               setLensRanges([])
               setShowLensForm(true)
             } else {
@@ -272,8 +279,8 @@ export default function InventoryPage() {
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                {(['baseCost', 'sellingPrice', 'stock'] as const).map(f => (
+              <div className="grid grid-cols-2 gap-3">
+                {(['baseCost', 'sellingPrice'] as const).map(f => (
                   <div key={f}>
                     <label className="text-sm font-medium text-muted-foreground">{t(`inventory.${f}` as any)}</label>
                     <input type="number" step="any" min="0" value={(lensForm as any)[f]}
@@ -428,13 +435,12 @@ export default function InventoryPage() {
             <div className="empty-state"><Package className="empty-state-icon" /><p className="empty-state-title">{t('inventory.noLensTypes')}</p></div>
           ) : (
             <table className="data-table">
-              <thead><tr><th>{t('inventory.name')}</th><th>{t('inventory.category')}</th><th>{t('inventory.material')}</th><th>{t('inventory.cost')}</th><th>{t('inventory.sellingPrice')}</th><th>{t('inventory.stock')}</th><th>{t('common.actions')}</th></tr></thead>
+              <thead><tr><th>{t('inventory.name')}</th><th>{t('inventory.category')}</th><th>{t('inventory.material')}</th><th>{t('inventory.cost')}</th><th>{t('inventory.sellingPrice')}</th><th>{t('common.actions')}</th></tr></thead>
               <tbody>
                 {lensTypes.map((l: any) => (
                   <tr key={l.id}>
                     <td className="font-medium">{l.name}</td><td>{l.category || '-'}</td><td>{l.material || '-'}</td>
-                    <td>{(l.baseCost ?? l.cost)?.toLocaleString()} DA</td><td>{l.sellingPrice?.toLocaleString()} DA</td>
-                    <td><span className={l.stock <= 0 ? 'text-red-500 font-medium' : l.stock <= 3 ? 'text-yellow-500 font-medium' : ''}>{l.stock}</span></td>
+                    <td>{lensHasGroups(l) ? <span className="text-muted-foreground italic">{t('inventory.groups')}</span> : `${(l.baseCost ?? l.cost ?? 0).toLocaleString()} DA`}</td><td>{l.sellingPrice?.toLocaleString()} DA</td>
                     <td>
                       <div className="flex items-center gap-1">
                         <button onClick={() => {
@@ -443,7 +449,6 @@ export default function InventoryPage() {
                             index: l.index != null ? String(l.index) : '',
                             baseCost: l.baseCost != null ? String(l.baseCost) : '',
                             sellingPrice: l.sellingPrice != null ? String(l.sellingPrice) : '',
-                            stock: l.stock != null ? String(l.stock) : '',
                             reorderThreshold: l.reorderThreshold != null ? String(l.reorderThreshold) : '',
                             supplierName: l.supplierName || '', supplierContact: l.supplierContact || '',
                           })

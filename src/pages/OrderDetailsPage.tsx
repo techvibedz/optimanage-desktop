@@ -4,6 +4,7 @@ import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
 import { useSettings } from '@/lib/settings-context'
 import { useConnectivityRefresh } from '@/lib/use-connectivity-refresh'
+import { matchRange, parseRanges, type PriceRange } from '@/lib/profit'
 import { toast } from 'sonner'
 import {
   ArrowLeft, User, CalendarDays, CreditCard, Package, Eye, Clock,
@@ -41,6 +42,35 @@ export default function OrderDetailsPage() {
 
   // Print
   const [showPrintSlip, setShowPrintSlip] = useState(false)
+
+  // Lens cost + group display helper (only used when settings.showLensCosts is on)
+  const lensCostDetail = (lensType: any, sphKey: string, cylKey: string): { cost: number; groupLabel: string } | null => {
+    if (!lensType) return null
+    const rx = order?.prescription
+    const sph = rx ? (rx as any)[sphKey] : null
+    const cyl = rx ? (rx as any)[cylKey] : null
+    const ranges = parseRanges(lensType.priceRanges)
+    const matched = matchRange(ranges, sph, cyl)
+    if (matched) {
+      const sphLabel = matched.sphMax == null ? '∞' : `≤ ${matched.sphMax}`
+      const cylLabel = matched.cylMax == null ? '∞' : `≤ ${matched.cylMax}`
+      return { cost: Number(matched.cost) || 0, groupLabel: `SPH ${sphLabel}, CYL ${cylLabel}` }
+    }
+    return { cost: Number(lensType.baseCost) || 0, groupLabel: t('orders.baseCost') || 'Base cost' }
+  }
+
+  const renderLensCost = (lensType: any, sphKey: string, cylKey: string, qty: number) => {
+    if (!settings.showLensCosts || isEditing || !lensType) return null
+    const ci = lensCostDetail(lensType, sphKey, cylKey)
+    if (!ci) return null
+    const total = ci.cost * (qty || 1)
+    return (
+      <p className="text-xs text-muted-foreground mt-0.5">
+        {t('orders.cost') || 'Cost'}: {total.toLocaleString()} DA
+        <span className="ml-1 opacity-70">({ci.groupLabel}{(qty || 1) > 1 ? ` ×${qty}` : ''})</span>
+      </p>
+    )
+  }
 
   const fetchOrder = async (showRefreshLoader = false) => {
     if (!id) return
@@ -798,6 +828,7 @@ export default function OrderDetailsPage() {
                             <>
                               {order.vlRightEyeLensType && <p className="text-xs">{order.vlRightEyeLensType.name}{(order.vlRightEyeLensQuantity || 1) > 1 ? ` ×${order.vlRightEyeLensQuantity}` : ''}</p>}
                               <p className="font-medium text-green-600">{(order.vlRightEyeLensPrice || 0).toLocaleString()} DA</p>
+                              {renderLensCost(order.vlRightEyeLensType, 'vlRightEyeSphere', 'vlRightEyeCylinder', order.vlRightEyeLensQuantity)}
                             </>
                           )}
                         </div>
@@ -818,6 +849,7 @@ export default function OrderDetailsPage() {
                             <>
                               {order.vlLeftEyeLensType && <p className="text-xs">{order.vlLeftEyeLensType.name}{(order.vlLeftEyeLensQuantity || 1) > 1 ? ` ×${order.vlLeftEyeLensQuantity}` : ''}</p>}
                               <p className="font-medium text-green-600">{(order.vlLeftEyeLensPrice || 0).toLocaleString()} DA</p>
+                              {renderLensCost(order.vlLeftEyeLensType, 'vlLeftEyeSphere', 'vlLeftEyeCylinder', order.vlLeftEyeLensQuantity)}
                             </>
                           )}
                         </div>
@@ -847,6 +879,7 @@ export default function OrderDetailsPage() {
                             <>
                               {order.vpRightEyeLensType && <p className="text-xs">{order.vpRightEyeLensType.name}{(order.vpRightEyeLensQuantity || 1) > 1 ? ` ×${order.vpRightEyeLensQuantity}` : ''}</p>}
                               <p className="font-medium text-green-600">{(order.vpRightEyeLensPrice || 0).toLocaleString()} DA</p>
+                              {renderLensCost(order.vpRightEyeLensType, 'vpRightEyeSphere', 'vpRightEyeCylinder', order.vpRightEyeLensQuantity)}
                             </>
                           )}
                         </div>
@@ -867,6 +900,7 @@ export default function OrderDetailsPage() {
                             <>
                               {order.vpLeftEyeLensType && <p className="text-xs">{order.vpLeftEyeLensType.name}{(order.vpLeftEyeLensQuantity || 1) > 1 ? ` ×${order.vpLeftEyeLensQuantity}` : ''}</p>}
                               <p className="font-medium text-green-600">{(order.vpLeftEyeLensPrice || 0).toLocaleString()} DA</p>
+                              {renderLensCost(order.vpLeftEyeLensType, 'vpLeftEyeSphere', 'vpLeftEyeCylinder', order.vpLeftEyeLensQuantity)}
                             </>
                           )}
                         </div>
@@ -879,7 +913,11 @@ export default function OrderDetailsPage() {
                     <div className="bg-muted/30 p-3 rounded-lg text-sm">
                       <div className="grid grid-cols-2 gap-3">
                         <div><span className="text-xs text-muted-foreground">Type</span><p className="font-medium">{order.lensType.name}</p></div>
-                        <div><span className="text-xs text-muted-foreground">Price</span><p className="font-medium text-green-600">{(order.lensType.sellingPrice || 0).toLocaleString()} DA</p></div>
+                        <div>
+                          <span className="text-xs text-muted-foreground">Price</span>
+                          <p className="font-medium text-green-600">{(order.lensType.sellingPrice || 0).toLocaleString()} DA</p>
+                          {renderLensCost(order.lensType, 'vlRightEyeSphere', 'vlRightEyeCylinder', 1)}
+                        </div>
                       </div>
                     </div>
                   )}

@@ -13,6 +13,7 @@ export interface Settings {
   currency: string
   timezone: string
   theme: 'light' | 'dark'
+  showLensCosts: boolean
 }
 
 interface SettingsContextType {
@@ -33,6 +34,7 @@ const defaultSettings: Settings = {
   currency: 'DA',
   timezone: 'Africa/Algiers',
   theme: 'dark',
+  showLensCosts: false,
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined)
@@ -81,12 +83,16 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
       if (!user?.id) return
       const result = await window.electronAPI.getSettings(user.id)
       if (result.data) {
-        const merged = { ...settings, ...result.data }
+        const data = {
+          ...result.data,
+          showLensCosts: result.data.showLensCosts === undefined ? false : !!result.data.showLensCosts,
+        }
+        const merged = { ...settings, ...data }
         setSettings(merged)
-        localStorage.setItem('settings', JSON.stringify(result.data))
-        if (result.data.language) {
-          setLanguage(result.data.language)
-          localStorage.setItem('language', result.data.language)
+        localStorage.setItem('settings', JSON.stringify(data))
+        if (data.language) {
+          setLanguage(data.language)
+          localStorage.setItem('language', data.language)
         }
       }
     } catch (err) {

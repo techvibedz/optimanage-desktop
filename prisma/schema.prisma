@@ -285,6 +285,7 @@ model Setting {
   language        String   @default("en")
   currency        String   @default("DA")
   timezone        String   @default("Africa/Algiers")
+  showLensCosts   Boolean  @default(false)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }

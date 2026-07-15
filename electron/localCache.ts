@@ -167,6 +167,7 @@ function initTables() {
       language TEXT DEFAULT 'en',
       currency TEXT DEFAULT 'DA',
       timezone TEXT DEFAULT 'Africa/Algiers',
+      showLensCosts INTEGER DEFAULT 0,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
     );
@@ -213,6 +214,7 @@ function initTables() {
     }
   }
   addColumnIfMissing('settings', 'nif', 'nif TEXT')
+  addColumnIfMissing('settings', 'showLensCosts', 'showLensCosts INTEGER DEFAULT 0')
   // Net-profit feature: lens cost groups, contact-lens cost, order cost snapshot.
   addColumnIfMissing('lensTypes', 'priceRanges', 'priceRanges TEXT')
   addColumnIfMissing('contactLenses', 'cost', 'cost REAL NOT NULL DEFAULT 0')
@@ -330,10 +332,11 @@ export function cacheLensType(lt: any) {
 
 export function cacheSetting(s: any) {
   const d = getDb()
-  d.prepare(`INSERT OR REPLACE INTO settings (id,userId,opticianName,opticianAddress,opticianPhone,opticianEmail,nif,logoUrl,language,currency,timezone,createdAt,updatedAt)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
+  d.prepare(`INSERT OR REPLACE INTO settings (id,userId,opticianName,opticianAddress,opticianPhone,opticianEmail,nif,logoUrl,language,currency,timezone,showLensCosts,createdAt,updatedAt)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
     s.id, s.userId||null, s.opticianName||'', s.opticianAddress||'', s.opticianPhone||'',
     s.opticianEmail||null, s.nif||null, s.logoUrl||null, s.language||'en', s.currency||'DA', s.timezone||'Africa/Algiers',
+    s.showLensCosts ? 1 : 0,
     toIso(s.createdAt), toIso(s.updatedAt)
   )
 }
@@ -891,23 +894,32 @@ export function getLocalDashboardStats(userId: string, filter: string = 'all'): 
 // Net profit summary from local cache — mirrors the online orders:profitSummary
 // handler so the figure is identical offline. Net profit = Σ(order total −
 // order cost) − expenses over the period.
-export function getLocalOrderProfitSummary(userId: string, filter: string = 'all'): any {
+export function getLocalOrderProfitSummary(userId: string, filter: string = 'all', startParam?: string, endParam?: string): any {
   const d = getDb()
   const now = new Date()
-  let orderDateFilter = ''
-  const orderArgs: any[] = [userId]
-  let expenseDateFilter = ''
-  const expenseArgs: any[] = [userId]
-  let payDateFilter = ''
-  const payArgs: any[] = [userId]
-  const setRange = (startIso: string) => {
-    orderDateFilter = ' AND createdAt >= ? AND createdAt <= ?'; orderArgs.push(startIso, now.toISOString())
-    expenseDateFilter = ' AND date >= ? AND date <= ?'; expenseArgs.push(startIso, now.toISOString())
-    payDateFilter = ' AND paymentDate >= ? AND paymentDate <= ?'; payArgs.push(startIso, now.toISOString())
+  let startDate: Date | null = null
+  let endDate = new Date(now)
+  if (filter === 'today') startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  else if (filter === 'week') { const s = new Date(now); s.setDate(now.getDate() - now.getDay()); s.setHours(0, 0, 0, 0); startDate = s }
+  else if (filter === 'month') startDate = new Date(now.getFullYear(), now.getMonth(), 1)
+  else if (filter === 'custom') {
+    if (startParam) startDate = new Date(startParam)
+    if (endParam) { endDate = new Date(endParam); if (String(endParam).indexOf('T') === -1) endDate.setHours(23, 59, 59, 999) }
   }
-  if (filter === 'today') setRange(new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString())
-  else if (filter === 'week') { const s = new Date(now); s.setDate(now.getDate() - now.getDay()); s.setHours(0, 0, 0, 0); setRange(s.toISOString()) }
-  else if (filter === 'month') setRange(new Date(now.getFullYear(), now.getMonth(), 1).toISOString())
+
+  const orderArgs: any[] = [userId]
+  const expenseArgs: any[] = [userId]
+  const payArgs: any[] = [userId]
+  let orderDateFilter = ''
+  let expenseDateFilter = ''
+  let payDateFilter = ''
+  if (startDate) {
+    const startIso = startDate.toISOString()
+    const endIso = endDate.toISOString()
+    orderDateFilter = ' AND createdAt >= ? AND createdAt <= ?'; orderArgs.push(startIso, endIso)
+    expenseDateFilter = ' AND date >= ? AND date <= ?'; expenseArgs.push(startIso, endIso)
+    payDateFilter = ' AND paymentDate >= ? AND paymentDate <= ?'; payArgs.push(startIso, endIso)
+  }
 
   // Revenue = money actually received on orders (by payment date). Unpaid
   // balances are excluded. Cost = full cost of orders created in the period.

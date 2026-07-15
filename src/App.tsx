@@ -21,6 +21,7 @@ const QuickSalePage = lazy(() => import('@/pages/QuickSalePage'))
 const CreateOrderPage = lazy(() => import('@/pages/CreateOrderPage'))
 const OrderDetailsPage = lazy(() => import('@/pages/OrderDetailsPage'))
 const LensSummaryPage = lazy(() => import('@/pages/LensSummaryPage'))
+const LensCostCalculatorPage = lazy(() => import('@/pages/LensCostCalculatorPage'))
 const PrescriptionDetailsPage = lazy(() => import('@/pages/PrescriptionDetailsPage'))
 const PrintFacturePage = lazy(() => import('@/pages/PrintFacturePage'))
 const PrintOrderSlipPage = lazy(() => import('@/pages/PrintOrderSlipPage'))
@@ -85,6 +86,7 @@ function AppRoutes() {
           <Route path="/expenses" element={<ExpensesPage />} />
           <Route path="/quick-sale" element={<QuickSalePage />} />
           <Route path="/lens-summary" element={<LensSummaryPage />} />
+          <Route path="/lens-cost-calculator" element={<LensCostCalculatorPage />} />
         </Route>
         {/* Print pages outside AppLayout — no navbar/sidebar */}
         <Route path="/orders/:id/facture" element={<ProtectedRoute><PrintFacturePage /></ProtectedRoute>} />

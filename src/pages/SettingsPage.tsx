@@ -42,6 +42,7 @@ export default function SettingsPage() {
     language: settings.language,
     currency: settings.currency,
     timezone: settings.timezone,
+    showLensCosts: settings.showLensCosts,
   })
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -168,6 +169,19 @@ export default function SettingsPage() {
               <input value={form.timezone} onChange={e => setForm(p => ({ ...p, timezone: e.target.value }))}
                 className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-background mt-1" />
             </div>
+          </div>
+          <div className="flex items-center justify-between pt-2 border-t border-border/30">
+            <div>
+              <label className="text-sm font-medium">{t('settings.showLensCosts') || 'Show lens costs on order details'}</label>
+              <p className="text-xs text-muted-foreground mt-0.5">{t('settings.showLensCostsHint') || 'Display the cost and matched prescription group for each lens on the order detail page'}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setForm(p => ({ ...p, showLensCosts: !p.showLensCosts }))}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${form.showLensCosts ? 'bg-primary' : 'bg-gray-300 dark:bg-gray-600'}`}
+            >
+              <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-transform ${form.showLensCosts ? 'translate-x-5' : 'translate-x-0'}`} />
+            </button>
           </div>
           <div className="pt-2">
             <button type="submit" className="px-6 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 text-sm font-medium">

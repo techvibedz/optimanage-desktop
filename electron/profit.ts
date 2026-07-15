@@ -37,6 +37,58 @@ export function parseRanges(raw: any): PriceRange[] {
     .filter((r: PriceRange) => Number.isFinite(r.cost))
 }
 
+// Find the PriceRange group for a given prescription power. Returns null when
+// there are no groups or no prescription power (→ caller falls back to baseCost).
+// CYL is the primary axis: groups with a cylMax bound are only used when the
+// prescription has a cylinder; groups with cylMax = null (empty) are only used
+// for prescriptions with no cylinder. When no group fully matches, the closest
+// group is chosen (largest sphMax among those whose cylMax fits).
+export function matchRange(
+  ranges: PriceRange[] | null | undefined,
+  sph: number | null | undefined,
+  cyl: number | null | undefined,
+): PriceRange | null {
+  if (!Array.isArray(ranges) || ranges.length === 0) return null
+  if (sph == null && cyl == null) return null
+  const s = Math.abs(Number(sph ?? 0))
+  const c = Math.abs(Number(cyl ?? 0))
+  const EPS = 1e-6
+  const hasCyl = c > EPS
+
+  // Groups split by whether they have a cylinder bound.
+  const cylBounded = ranges.filter(r => r.cylMax != null) // groups with a CYL limit
+  const sphOnly = ranges.filter(r => r.cylMax == null)     // groups with cylMax = ∞ (sph-only)
+
+  if (hasCyl) {
+    // 1. Full match: cylMax set, both SPH and CYL fit → tightest (smallest cylMax, then sphMax).
+    const full = cylBounded.filter(r => s <= bound(r.sphMax) + EPS && c <= bound(r.cylMax) + EPS)
+    if (full.length > 0) return [...full].sort((a, b) => (bound(a.cylMax) - bound(b.cylMax)) || (bound(a.sphMax) - bound(b.sphMax)))[0]
+
+    // 2. No full match: groups where CYL fits → pick the LARGEST sphMax (closest to the prescription).
+    const cylFits = cylBounded.filter(r => c <= bound(r.cylMax) + EPS)
+    if (cylFits.length > 0) return [...cylFits].sort((a, b) => bound(b.sphMax) - bound(a.sphMax))[0]
+
+    // 3. No cyl-bounded group fits the cylinder → pick the closest cyl-bounded
+    //    group (largest cylMax = closest to the prescription's CYL, then largest sphMax).
+    //    Never fall back to sph-only groups when the prescription has a cylinder.
+    if (cylBounded.length > 0) return [...cylBounded].sort((a, b) => (bound(b.cylMax) - bound(a.cylMax)) || (bound(b.sphMax) - bound(a.sphMax)))[0]
+  } else {
+    // No cylinder in prescription → prefer sph-only groups (cylMax = null).
+    // 1. Full match: SPH fits → tightest (smallest sphMax).
+    const full = sphOnly.filter(r => s <= bound(r.sphMax) + EPS)
+    if (full.length > 0) return [...full].sort((a, b) => bound(a.sphMax) - bound(b.sphMax))[0]
+
+    // 2. No full match → LARGEST sphMax (closest).
+    if (sphOnly.length > 0) return [...sphOnly].sort((a, b) => bound(b.sphMax) - bound(a.sphMax))[0]
+
+    // 3. No sph-only groups → fall back to cyl-bounded groups (cyl ≈ 0 fits any).
+    if (cylBounded.length > 0) return [...cylBounded].sort((a, b) => bound(b.sphMax) - bound(a.sphMax))[0]
+  }
+
+  // 4. Final fallback: loosest group overall.
+  return [...ranges].sort((a, b) => (bound(b.sphMax) - bound(a.sphMax)) || (bound(b.cylMax) - bound(a.cylMax)))[0]
+}
+
 // Find the cost for a given prescription power. Returns null when no group
 // matches (or there are no groups / no prescription) so the caller can fall
 // back to the lens's flat baseCost.
@@ -45,17 +97,8 @@ export function matchRangeCost(
   sph: number | null | undefined,
   cyl: number | null | undefined,
 ): number | null {
-  if (!Array.isArray(ranges) || ranges.length === 0) return null
-  // No prescription power at all → cannot pick a group; use baseCost instead.
-  if (sph == null && cyl == null) return null
-  const s = Math.abs(Number(sph ?? 0))
-  const c = Math.abs(Number(cyl ?? 0))
-  const EPS = 1e-6
-  const matches = ranges.filter(r => s <= bound(r.sphMax) + EPS && c <= bound(r.cylMax) + EPS)
-  if (matches.length === 0) return null
-  // Tightest group wins: smallest sphere bound, then smallest cylinder bound.
-  matches.sort((a, b) => (bound(a.sphMax) - bound(b.sphMax)) || (bound(a.cylMax) - bound(b.cylMax)))
-  return Number(matches[0].cost) || 0
+  const r = matchRange(ranges, sph, cyl)
+  return r ? (Number(r.cost) || 0) : null
 }
 
 // Cost of one lens slot: range lookup for its eye's power, else the flat baseCost.

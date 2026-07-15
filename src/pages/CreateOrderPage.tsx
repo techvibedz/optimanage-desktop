@@ -2,13 +2,14 @@ import { useEffect, useState, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/lib/auth-context'
 import { useTranslation } from '@/lib/use-translation'
+import { useSettings } from '@/lib/settings-context'
 import { toast } from 'sonner'
 import {
   Plus, Trash2, X, Printer, Search,
   ChevronDown, Check, FileText, ScanLine, Loader2, Camera, Video, ListPlus, Pencil
 } from 'lucide-react'
 import OrderSlip from '@/components/print/OrderSlip'
-import { lensUnitCost } from '@/lib/profit'
+import { lensUnitCost, matchRange, parseRanges } from '@/lib/profit'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Customer = { id: string; firstName: string; lastName: string; email?: string; phone?: string }
@@ -386,6 +387,7 @@ export default function CreateOrderPage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
   const { user } = useAuth()
+  const { settings } = useSettings()
 
   // Data
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -1002,6 +1004,29 @@ export default function CreateOrderPage() {
   // ─── Selected prescription ──────────────────────────────────────────────
   const selectedPrescription = prescriptions.find(p => p.id === prescriptionId)
 
+  // ─── Lens cost display (only when settings.showLensCosts is on) ─────────
+  const renderLensCostLine = (lensId: string, sphKey: string, cylKey: string, qty: number) => {
+    if (!settings.showLensCosts || !lensId) return null
+    const lt = lensTypes.find(l => l.id === lensId)
+    if (!lt) return null
+    const rx = selectedPrescription as any
+    const sph = rx ? rx[sphKey] : null
+    const cyl = rx ? rx[cylKey] : null
+    const ranges = parseRanges(lt.priceRanges)
+    const matched = matchRange(ranges, sph, cyl)
+    const cost = matched ? (Number(matched.cost) || 0) : (Number(lt.baseCost) || 0)
+    const groupLabel = matched
+      ? `SPH ${matched.sphMax == null ? '∞' : `≤ ${matched.sphMax}`}, CYL ${matched.cylMax == null ? '∞' : `≤ ${matched.cylMax}`}`
+      : (t('orders.baseCost') || 'Base cost')
+    const total = cost * (qty || 1)
+    return (
+      <p className="text-xs text-muted-foreground mt-1">
+        {t('orders.cost') || 'Cost'}: {total.toLocaleString()} {t('orders.currency')}
+        <span className="ml-1 opacity-70">({groupLabel}{(qty || 1) > 1 ? ` ×${qty}` : ''})</span>
+      </p>
+    )
+  }
+
   // ─── Ready date shortcuts ──────────────────────────────────────────────
   const readyDateOptions = [
     { label: t('orders.tomorrow'), days: 1 },
@@ -1474,6 +1499,7 @@ export default function CreateOrderPage() {
                 <div>
                   <LensTypeSelect lensTypes={lensTypes} value={vlRightLensId} label={t('orders.rightEye')} t={t}
                     onSelect={(id, price) => { setVlRightLensId(id); setVlRightLensPrice(price) }} />
+                  {renderLensCostLine(vlRightLensId, 'vlRightEyeSphere', 'vlRightEyeCylinder', vlRightQty)}
                   <div className="flex items-center gap-2 mt-2">
                     <label className="text-xs text-muted-foreground">{t('orders.qty')}:</label>
                     <input type="number" min={1} value={vlRightQty} onChange={e => setVlRightQty(Math.max(1, parseInt(e.target.value) || 1))}
@@ -1488,6 +1514,7 @@ export default function CreateOrderPage() {
                 <div>
                   <LensTypeSelect lensTypes={lensTypes} value={vlLeftLensId} label={t('orders.leftEye')} t={t}
                     onSelect={(id, price) => { setVlLeftLensId(id); setVlLeftLensPrice(price) }} />
+                  {renderLensCostLine(vlLeftLensId, 'vlLeftEyeSphere', 'vlLeftEyeCylinder', vlLeftQty)}
                   <div className="flex items-center gap-2 mt-2">
                     <label className="text-xs text-muted-foreground">{t('orders.qty')}:</label>
                     <input type="number" min={1} value={vlLeftQty} onChange={e => setVlLeftQty(Math.max(1, parseInt(e.target.value) || 1))}
@@ -1519,6 +1546,7 @@ export default function CreateOrderPage() {
                 <div>
                   <LensTypeSelect lensTypes={lensTypes} value={vpRightLensId} label={t('orders.rightEye')} t={t}
                     onSelect={(id, price) => { setVpRightLensId(id); setVpRightLensPrice(price) }} />
+                  {renderLensCostLine(vpRightLensId, 'vpRightEyeSphere', 'vpRightEyeCylinder', vpRightQty)}
                   <div className="flex items-center gap-2 mt-2">
                     <label className="text-xs text-muted-foreground">{t('orders.qty')}:</label>
                     <input type="number" min={1} value={vpRightQty} onChange={e => setVpRightQty(Math.max(1, parseInt(e.target.value) || 1))}
@@ -1533,6 +1561,7 @@ export default function CreateOrderPage() {
                 <div>
                   <LensTypeSelect lensTypes={lensTypes} value={vpLeftLensId} label={t('orders.leftEye')} t={t}
                     onSelect={(id, price) => { setVpLeftLensId(id); setVpLeftLensPrice(price) }} />
+                  {renderLensCostLine(vpLeftLensId, 'vpLeftEyeSphere', 'vpLeftEyeCylinder', vpLeftQty)}
                   <div className="flex items-center gap-2 mt-2">
                     <label className="text-xs text-muted-foreground">{t('orders.qty')}:</label>
                     <input type="number" min={1} value={vpLeftQty} onChange={e => setVpLeftQty(Math.max(1, parseInt(e.target.value) || 1))}

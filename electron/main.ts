@@ -2531,6 +2531,7 @@ function registerIpcHandlers() {
             opticianAddress: '123 Main Street, City, Country',
             opticianPhone: '+1 234 567 8900',
             language: 'en', currency: 'DA', timezone: 'Africa/Algiers',
+            showLensCosts: false,
             createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
           }
           localCache.cacheSetting(data)
@@ -2615,7 +2616,7 @@ function registerIpcHandlers() {
   ipcMain.handle('orders:profitSummary', async (_e, params: any) => {
     try {
       if (!isDbAvailable()) {
-        return { data: localCache.getLocalOrderProfitSummary(params.userId, params.filter) }
+        return { data: localCache.getLocalOrderProfitSummary(params.userId, params.filter, params.startDate, params.endDate) }
       }
       const { userId, filter = 'all', startDate: startParam, endDate: endParam } = params
       const now = new Date()
@@ -2682,7 +2683,7 @@ function registerIpcHandlers() {
       }
     } catch (err: any) {
       if (isNetworkError(err)) {
-        return { data: localCache.getLocalOrderProfitSummary(params.userId, params.filter) }
+        return { data: localCache.getLocalOrderProfitSummary(params.userId, params.filter, params.startDate, params.endDate) }
       }
       return { error: err.message }
     }
