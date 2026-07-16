@@ -259,7 +259,7 @@ function FrameSelectDropdown({ frames, onSelect, exclude, t }: {
   const filtered = available.filter(f => {
     if (!query.trim()) return true
     const q = query.toLowerCase()
-    return `${f.brand} ${f.model}`.toLowerCase().includes(q) || f.color?.toLowerCase().includes(q)
+    return f.brand?.toLowerCase().includes(q) || f.model?.toLowerCase().includes(q) || f.color?.toLowerCase().includes(q) || f.size?.toLowerCase().includes(q)
   })
 
   return (

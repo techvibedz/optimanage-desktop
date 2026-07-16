@@ -1,6 +1,6 @@
 {
   "name": "optimanage-desktop",
-  "version": "1.8.0",
+  "version": "1.8.2",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {

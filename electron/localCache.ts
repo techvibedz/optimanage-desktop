@@ -421,11 +421,37 @@ export function deleteLocalPrescription(id: string) {
 }
 
 export function deleteLocalFrame(id: string) {
+  // Null out frameId on local orders so the local state matches the server
+  // post-sync (the frame relation is detached before delete). Keeps offline
+  // order display consistent and prevents a dangling reference after hydrate.
+  getDb().prepare('UPDATE orders SET frameId=NULL WHERE frameId=?').run(id)
   getDb().prepare('DELETE FROM frames WHERE id=?').run(id)
+}
+
+// When a local frame syncs to the server, repoint all local orders that
+// referenced the local_ frameId to the real server ID — NOT null. Unlike
+// deleteLocalFrame (which nulls the FK because the frame is being removed),
+// this preserves the frame→order link so the synced order carries the frame.
+export function replaceLocalFrame(localId: string, serverId: string) {
+  const d = getDb()
+  d.prepare('UPDATE orders SET frameId=? WHERE frameId=?').run(serverId, localId)
+  d.prepare('DELETE FROM frames WHERE id=?').run(localId)
 }
 
 export function deleteLocalLensType(id: string) {
   getDb().prepare('DELETE FROM lensTypes WHERE id=?').run(id)
+}
+
+// When a local lens type syncs to the server, repoint all local orders that
+// referenced the local_ lensTypeId (and per-eye variants) to the real server ID.
+export function replaceLocalLensType(localId: string, serverId: string) {
+  const d = getDb()
+  d.prepare('UPDATE orders SET lensTypeId=? WHERE lensTypeId=?').run(serverId, localId)
+  d.prepare('UPDATE orders SET vlRightEyeLensTypeId=? WHERE vlRightEyeLensTypeId=?').run(serverId, localId)
+  d.prepare('UPDATE orders SET vlLeftEyeLensTypeId=? WHERE vlLeftEyeLensTypeId=?').run(serverId, localId)
+  d.prepare('UPDATE orders SET vpRightEyeLensTypeId=? WHERE vpRightEyeLensTypeId=?').run(serverId, localId)
+  d.prepare('UPDATE orders SET vpLeftEyeLensTypeId=? WHERE vpLeftEyeLensTypeId=?').run(serverId, localId)
+  d.prepare('DELETE FROM lensTypes WHERE id=?').run(localId)
 }
 
 export function cacheContactLens(c: any) {
@@ -640,8 +666,13 @@ export function getLocalPayments(userId: string, params: any = {}): { payments: 
   return { payments, total }
 }
 
-export function getLocalFrames(userId: string): any[] {
-  return getDb().prepare('SELECT * FROM frames WHERE userId=? ORDER BY brand ASC').all(userId)
+export function getLocalFrames(userId: string, search?: string): any[] {
+  const d = getDb()
+  if (search) {
+    const s = `%${search}%`
+    return d.prepare(`SELECT * FROM frames WHERE userId=? AND (brand LIKE ? OR model LIKE ? OR color LIKE ? OR size LIKE ?) ORDER BY brand ASC`).all(userId, s, s, s, s)
+  }
+  return d.prepare('SELECT * FROM frames WHERE userId=? ORDER BY brand ASC').all(userId)
 }
 
 export function getLocalContactLenses(userId: string, search?: string): any[] {

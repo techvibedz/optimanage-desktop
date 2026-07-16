@@ -568,6 +568,13 @@ app.whenReady().then(() => {
             const mappedPrescriptionId = localCache.getLocalIdMapping(picked.prescriptionId)
             if (mappedPrescriptionId) picked.prescriptionId = mappedPrescriptionId
           }
+          // Resolve frame and lens type local_ references to server IDs
+          for (const fk of ['frameId', 'lensTypeId', 'vlRightEyeLensTypeId', 'vlLeftEyeLensTypeId', 'vpRightEyeLensTypeId', 'vpLeftEyeLensTypeId']) {
+            if (typeof picked[fk] === 'string' && picked[fk].startsWith('local_')) {
+              const mapped = localCache.getLocalIdMapping(picked[fk])
+              if (mapped) picked[fk] = mapped
+            }
+          }
           if (typeof picked.customerId === 'string' && picked.customerId.startsWith('local_')) throw new Error(`Unresolved local customer reference: ${picked.customerId}`)
           // If prescription is still local_, try to sync it from local SQLite inline
           if (typeof picked.prescriptionId === 'string' && picked.prescriptionId.startsWith('local_')) {
@@ -732,11 +739,20 @@ app.whenReady().then(() => {
           }
           const data = await prisma.frame.create({ data: pickFields(p, FRAME_FIELDS) as any })
           localCache.cacheFrame(data)
-          if (p.localId) localCache.deleteLocalFrame(p.localId)
+          if (p.localId) {
+            localCache.cacheLocalIdMapping(p.localId, data.id, 'frame')
+            localCache.replaceLocalFrame(p.localId, data.id)
+          }
           return data
         },
         'frames:update': (p) => prisma.frame.update({ where: { id: p.id }, data: pickFields(p.updates, FRAME_FIELDS) }),
-        'frames:delete': (p) => prisma.frame.delete({ where: { id: p.id } }),
+        'frames:delete': async (p) => {
+          await prisma.$transaction([
+            prisma.order.updateMany({ where: { frameId: p.id }, data: { frameId: null } }),
+            prisma.orderFrame.deleteMany({ where: { frameId: p.id } }),
+            prisma.frame.delete({ where: { id: p.id } }),
+          ])
+        },
         'lensTypes:create': async (p) => {
           if (currentUser && p.userId !== currentUser.id) {
             console.warn(`[Sync] Fixing userId in queued lensType: ${p.userId} → ${currentUser.id}`)
@@ -744,7 +760,10 @@ app.whenReady().then(() => {
           }
           const data = await prisma.lensType.create({ data: pickFields(p, LENS_TYPE_FIELDS) as any })
           localCache.cacheLensType(data)
-          if (p.localId) localCache.deleteLocalLensType(p.localId)
+          if (p.localId) {
+            localCache.cacheLocalIdMapping(p.localId, data.id, 'lensType')
+            localCache.replaceLocalLensType(p.localId, data.id)
+          }
           return data
         },
         'lensTypes:update': (p) => prisma.lensType.update({ where: { id: p.id }, data: pickFields(p.updates, LENS_TYPE_FIELDS) }),
@@ -756,7 +775,10 @@ app.whenReady().then(() => {
           }
           const data = await prisma.contactLens.create({ data: pickFields(p, CONTACT_LENS_FIELDS) as any })
           localCache.cacheContactLens(data)
-          if (p.localId) localCache.deleteLocalContactLens(p.localId)
+          if (p.localId) {
+            localCache.cacheLocalIdMapping(p.localId, data.id, 'contactLens')
+            localCache.deleteLocalContactLens(p.localId)
+          }
           return data
         },
         'contactLenses:update': (p) => prisma.contactLens.update({ where: { id: p.id }, data: pickFields(p.updates, CONTACT_LENS_FIELDS) }),
@@ -1407,6 +1429,7 @@ function isNetworkError(err: any): boolean {
     msg.includes('ETIMEDOUT') ||
     msg.includes('ENOTFOUND') ||
     msg.includes('fetch failed') ||
+    msg.includes('Handler timeout after') ||
     err?.code === 'P1001' ||
     err?.code === 'P1002' ||
     err?.code === 'P1017' ||
@@ -1558,12 +1581,12 @@ function registerIpcHandlers() {
           { email: { contains: s, mode: 'insensitive' } },
         ]
       }
-      const data = await prisma.customer.findMany({
+      const data = await syncManager.withTimeout<any[]>(prisma.customer.findMany({
         where,
         select: { id: true, firstName: true, lastName: true, email: true, phone: true, createdAt: true, updatedAt: true, userId: true },
         orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
         ...(params.limit ? { take: params.limit } : {}),
-      })
+      }), 5_000, 'customers:list')
       markDbReachable()
       try { for (const c of data) localCache.cacheCustomer(c) } catch {}
       return { data }
@@ -2081,12 +2104,12 @@ function registerIpcHandlers() {
           { size: { contains: params.query, mode: 'insensitive' } },
         ]
       }
-      const data = await prisma.frame.findMany({ where, orderBy: [{ stock: 'desc' }, { brand: 'asc' }] })
+      const data = await syncManager.withTimeout<any[]>(prisma.frame.findMany({ where, orderBy: [{ stock: 'desc' }, { brand: 'asc' }] }), 5_000, 'frames:list')
       try { for (const f of data) localCache.cacheFrame(f) } catch {}
       return { data }
     } catch (err: any) {
       if (isNetworkError(err)) {
-        return { data: localCache.getLocalFrames(params.userId) }
+        return { data: localCache.getLocalFrames(params.userId, params.query) }
       }
       return { error: err.message }
     }
@@ -2117,7 +2140,10 @@ function registerIpcHandlers() {
       return { data }
     } catch (err: any) {
       if (isNetworkError(err)) {
-        syncManager.addToQueue('frames:update', { id, updates }, id, currentUser?.id)
+        const existing = localCache.getLocalFrames(currentUser?.id || '').find((f: any) => f.id === id)
+        if (existing) localCache.cacheFrame({ ...existing, ...pickFields(updates, FRAME_FIELDS), updatedAt: new Date().toISOString() })
+        if (id.startsWith('local_')) syncManager.updateCreatePayload(id, pickFields(updates, FRAME_FIELDS))
+        else syncManager.addToQueue('frames:update', { id, updates }, id, currentUser?.id)
         return { data: updates }
       }
       return { error: err.message }
@@ -2127,7 +2153,15 @@ function registerIpcHandlers() {
   ipcMain.handle('frames:delete', async (_e, id: string) => {
     try {
       requireDb()
-      await prisma.frame.delete({ where: { id } })
+      // Detach the frame from any orders before deleting so the FK constraint
+      // (Order.frameId / OrderFrame.frameId, both Restrict) doesn't block us.
+      // Order financials (framePrice, totalPrice, balanceDue) are snapshots and
+      // stay intact — only the relational link is cleared.
+      await prisma.$transaction([
+        prisma.order.updateMany({ where: { frameId: id }, data: { frameId: null } }),
+        prisma.orderFrame.deleteMany({ where: { frameId: id } }),
+        prisma.frame.delete({ where: { id } }),
+      ])
       localCache.deleteLocalFrame(id)
       return { success: true }
     } catch (err: any) {
@@ -2153,7 +2187,7 @@ function registerIpcHandlers() {
           { material: { contains: params.search, mode: 'insensitive' } },
         ]
       }
-      const data = await prisma.lensType.findMany({ where, orderBy: { name: 'asc' } })
+      const data = await syncManager.withTimeout<any[]>(prisma.lensType.findMany({ where, orderBy: { name: 'asc' } }), 5_000, 'lensTypes:list')
       try { for (const lt of data) localCache.cacheLensType(lt) } catch {}
       return { data }
     } catch (err: any) {
@@ -2189,7 +2223,10 @@ function registerIpcHandlers() {
       return { data }
     } catch (err: any) {
       if (isNetworkError(err)) {
-        syncManager.addToQueue('lensTypes:update', { id, updates }, id, currentUser?.id)
+        const existing = localCache.getLocalLensTypes(currentUser?.id || '').find((l: any) => l.id === id)
+        if (existing) localCache.cacheLensType({ ...existing, ...pickFields(updates, LENS_TYPE_FIELDS), updatedAt: new Date().toISOString() })
+        if (id.startsWith('local_')) syncManager.updateCreatePayload(id, pickFields(updates, LENS_TYPE_FIELDS))
+        else syncManager.addToQueue('lensTypes:update', { id, updates }, id, currentUser?.id)
         return { data: updates }
       }
       return { error: err.message }
@@ -2224,7 +2261,7 @@ function registerIpcHandlers() {
           { model: { contains: params.search, mode: 'insensitive' } },
         ]
       }
-      const data = await prisma.contactLens.findMany({ where, orderBy: { brand: 'asc' } })
+      const data = await syncManager.withTimeout<any[]>(prisma.contactLens.findMany({ where, orderBy: { brand: 'asc' } }), 5_000, 'contactLenses:list')
       try { for (const c of data) localCache.cacheContactLens(c) } catch {}
       return { data }
     } catch (err: any) {

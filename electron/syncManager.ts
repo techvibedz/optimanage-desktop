@@ -347,8 +347,9 @@ export async function processQueue(
   }
   if (queue.length === 0) return 0
 
-  // Sort queue: customers first, then prescriptions, then orders, then payments
-  const priority: Record<string, number> = { 'customers:create': 0, 'prescriptions:create': 1, 'orders:create': 2, 'payments:create': 3 }
+  // Sort queue: customers first, then prescriptions, then frames/lensTypes, then orders, then payments.
+  // Frames and lens types must sync before orders because orders reference them by FK.
+  const priority: Record<string, number> = { 'customers:create': 0, 'prescriptions:create': 1, 'frames:create': 2, 'lensTypes:create': 3, 'contactLenses:create': 4, 'orders:create': 5, 'payments:create': 6 }
   queue.sort((a, b) => (priority[a.action] ?? 9) - (priority[b.action] ?? 9))
 
   console.log(`[SyncManager] Processing ${queue.length} queued items...`)
